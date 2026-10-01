@@ -31,7 +31,7 @@ kun builds V8 from this fork (kun's `docs/P3.md`, decision 10). macOS,
 2026-10-02, Apple M4: built with `v8_enable_pointer_compression` in 23
 minutes; kun's tests and `scripts/ci.py matrix` pass against it, and
 `unwrap` checks the wrap tag (kun's `bindings` test
-`unwrap_checks_the_wrap_tag`). So far that is a debug V8 (see
+`unwrap_checks_the_wrap_tag`). kun keeps a debug and a release build (see
 `../rusty_v8_artifacts/README.kun.md`). Windows not tried yet.
 
 kun builds V8 once with `python3 scripts/ci.py v8` and keeps the result in
@@ -60,6 +60,12 @@ Code changes are marked with `kun:` comments.
   `src/binding.cc`): `v8::cppgc::testing` wraps cppgc's
   `StandaloneTestingHeap`, step-by-step marking on a `DetachedHeap`, a heap
   that can't be attached to an isolate.
+- **Archive artifacts follow cargo's profile** (`build.rs`,
+  `prebuilt_profile`): with `RUSTY_V8_ARCHIVE` set, a dev build links the
+  `_debug_` library and a `--release` build the `_release_` one, as a build
+  from source picks gn's `is_debug`. Upstream links `_release_` unless
+  `V8_FORCE_DEBUG` is set. kun keeps both builds there (see
+  `../rusty_v8_artifacts/README.kun.md`).
 - `.gitignore`: `/gen/*.rs`. The build script copies the generated
   binding into `gen/` (from `RUSTY_V8_ARCHIVE`'s directory, or a download);
   upstream only tracks `gen/.gitkeep`, so it showed up as untracked.
