@@ -60,6 +60,11 @@ Code changes are marked with `kun:` comments.
   `src/binding.cc`): `v8::cppgc::testing` wraps cppgc's
   `StandaloneTestingHeap`, step-by-step marking on a `DetachedHeap`, a heap
   that can't be attached to an isolate.
+- **`Object::is_wrapping`** (`src/object.rs`, `src/binding.cc`): whether
+  an API wrapper wraps anything, whatever the tag (V8's
+  `kAnyCppHeapPointer` range). `unwrap` only sees objects wrapped with the
+  tag it is given, so kun's `dom` uses this to make sure a new wrapper
+  wraps nothing yet.
 - **Archive artifacts follow cargo's profile** (`build.rs`,
   `prebuilt_profile`): with `RUSTY_V8_ARCHIVE` set, a dev build links the
   `_debug_` library and a `--release` build the `_release_` one, as a build

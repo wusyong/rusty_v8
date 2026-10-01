@@ -258,6 +258,10 @@ unsafe extern "C" {
     tag: u16,
   ) -> *mut RustObj;
   fn v8__Object__IsApiWrapper(this: *const Object) -> bool;
+  fn v8__Object__IsWrapping(
+    isolate: *const RealIsolate,
+    wrapper: *const Object,
+  ) -> bool;
   fn v8__Object__IsCallable(this: *const Object) -> bool;
   fn v8__Object__IsConstructor(this: *const Object) -> bool;
   fn v8__Object__CallAsFunction(
@@ -899,6 +903,15 @@ impl Object {
   #[inline(always)]
   pub fn is_api_wrapper(&self) -> bool {
     unsafe { v8__Object__IsApiWrapper(self) }
+  }
+
+  /// kun: whether `wrapper` wraps a C++ object, whatever its tag (`unwrap`
+  /// only sees objects wrapped with the tag it is given). False for an
+  /// object that isn't an API wrapper, which can't wrap anything.
+  #[inline(always)]
+  pub fn is_wrapping(isolate: &mut Isolate, wrapper: Local<Object>) -> bool {
+    wrapper.is_api_wrapper()
+      && unsafe { v8__Object__IsWrapping(isolate.as_real_ptr(), &*wrapper) }
   }
 
   /// Sets the integrity level of the object.

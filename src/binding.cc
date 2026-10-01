@@ -4680,6 +4680,12 @@ RustObj* v8__Object__Unwrap(v8::Isolate* isolate, const v8::Object& wrapper,
       v8::Object::Unwrap(isolate, ptr_to_local(&wrapper), tag_range));
 }
 
+// kun: `wrapper` is an API wrapper; any tag but the free-entry ones.
+bool v8__Object__IsWrapping(v8::Isolate* isolate, const v8::Object& wrapper) {
+  return v8::Object::Unwrap(isolate, ptr_to_local(&wrapper),
+                            v8::kAnyCppHeapPointer) != nullptr;
+}
+
 void v8__Object__Wrap(v8::Isolate* isolate, const v8::Object& wrapper,
                       RustObj* value, v8::CppHeapPointerTag tag) {
   v8::Object::Wrap(isolate, ptr_to_local(&wrapper), value, tag);
