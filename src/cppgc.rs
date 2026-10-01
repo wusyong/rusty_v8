@@ -11,8 +11,15 @@ use crate::support::int;
 use std::cell::UnsafeCell;
 use std::ffi::CStr;
 use std::ffi::c_char;
+use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
+
+// kun: GC pointer slots sound under concurrent marking, and test-only GC
+// control; see each module.
+mod slot;
+pub mod testing;
+pub use slot::{MemberSlot, TracedSlot, WeakMemberSlot};
 
 unsafe extern "C" {
   fn cppgc__initialize_process(platform: *mut Platform);
@@ -29,6 +36,8 @@ unsafe extern "C" {
     heap: *mut Heap,
     size: usize,
     alignment: usize,
+    init: unsafe extern "C" fn(obj: *mut RustObj, data: *mut c_void),
+    data: *mut c_void,
   ) -> *mut RustObj;
 
   fn cppgc__heap__enable_detached_garbage_collections_for_testing(
@@ -373,26 +382,50 @@ pub unsafe fn make_garbage_collected<T: GarbageCollected + 'static>(
   let additional_bytes =
     std::mem::size_of::<RustObjConcrete<T>>() - std::mem::size_of::<RustObj>();
 
+  // kun: the Rust data is written by `init_rust_obj`, which `RustObj`'s
+  // constructor calls, so it is published together with the object (see
+  // `RustObjInit` in `support.h`). Writing it after allocation returned,
+  // as upstream does, comes after cppgc's "fully constructed" release
+  // store, and a concurrent marker could read the object (including the
+  // `dynamic` pointer it calls `trace` through) without synchronizing.
+  let mut obj = std::mem::ManuallyDrop::new(obj);
   let pointer = unsafe {
     cppgc__make_garbage_collectable(
       heap as *const Heap as *mut _,
       additional_bytes,
       std::mem::align_of::<RustObjConcrete<T>>(),
+      init_rust_obj::<T>,
+      &mut *obj as *mut T as *mut c_void,
     )
   };
 
+  // Only a bad alignment returns null, and the assertion above rules it
+  // out; `obj` was moved into the object by `init_rust_obj`.
   assert!(!pointer.is_null());
-
-  unsafe {
-    let pointer = &mut *(pointer as *mut RustObjConcrete<T>);
-    let value_ptr = std::ptr::addr_of_mut!(pointer.value);
-    value_ptr.write(obj);
-    std::ptr::addr_of_mut!(pointer.dynamic).write(value_ptr as _);
-  }
 
   UnsafePtr {
     pointer: unsafe { NonNull::new_unchecked(pointer) },
     _phantom: PhantomData,
+  }
+}
+
+/// `RustObjInit` for a `RustObjConcrete<T>`: moves the `T` that `data`
+/// points to into the new object and sets its `dynamic` pointer. Called
+/// from `RustObj`'s constructor, once.
+///
+/// # Safety
+///
+/// `obj` is a `RustObjConcrete<T>` under construction, and `data` points to
+/// a `T` that the caller won't use or drop afterwards.
+unsafe extern "C" fn init_rust_obj<T: GarbageCollected + 'static>(
+  obj: *mut RustObj,
+  data: *mut c_void,
+) {
+  unsafe {
+    let obj = obj as *mut RustObjConcrete<T>;
+    let value_ptr = std::ptr::addr_of_mut!((*obj).value);
+    value_ptr.write((data as *mut T).read());
+    std::ptr::addr_of_mut!((*obj).dynamic).write(value_ptr as _);
   }
 }
 

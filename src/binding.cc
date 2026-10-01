@@ -11,8 +11,10 @@
 #include <vector>
 
 #include "cppgc/allocation.h"
+#include "cppgc/heap-state.h"
 #include "cppgc/persistent.h"
 #include "cppgc/platform.h"
+#include "cppgc/testing.h"
 #include "libplatform/libplatform.h"
 #include "support.h"
 #include "unicode/locid.h"
@@ -4717,19 +4719,57 @@ void cppgc__heap__collect_garbage_for_testing(
   heap->CollectGarbageForTesting(stack_state);
 }
 
-class alignas(16) RustObjButAlign16 : public RustObj {};
+class alignas(16) RustObjButAlign16 : public RustObj {
+ public:
+  using RustObj::RustObj;
+};
 
 RustObj* cppgc__make_garbage_collectable(v8::CppHeap* heap, size_t size,
-                                         size_t alignment) {
+                                         size_t alignment, RustObjInit init,
+                                         void* data) {
   if (alignment <= 8) {
-    return cppgc::MakeGarbageCollected<RustObj>(heap->GetAllocationHandle(),
-                                                cppgc::AdditionalBytes(size));
+    return cppgc::MakeGarbageCollected<RustObj>(
+        heap->GetAllocationHandle(), cppgc::AdditionalBytes(size), init, data);
   }
   if (alignment <= 16) {
     return cppgc::MakeGarbageCollected<RustObjButAlign16>(
-        heap->GetAllocationHandle(), cppgc::AdditionalBytes(size));
+        heap->GetAllocationHandle(), cppgc::AdditionalBytes(size), init, data);
   }
   return nullptr;
+}
+
+// kun: cppgc's public testing API, for `cppgc::testing` in `src/cppgc/
+// testing.rs`. Only valid on a heap attached to no isolate.
+
+void cppgc__testing__start_gc(v8::CppHeap* heap) {
+  cppgc::testing::StandaloneTestingHeap(heap->GetHeapHandle())
+      .StartGarbageCollection();
+}
+
+// Returns true once marking has no more work. The caller holds no unrooted
+// GC pointers on the stack, so the step doesn't scan it.
+bool cppgc__testing__marking_step(v8::CppHeap* heap) {
+  return cppgc::testing::StandaloneTestingHeap(heap->GetHeapHandle())
+      .PerformMarkingStep(cppgc::EmbedderStackState::kNoHeapPointers);
+}
+
+void cppgc__testing__finalize_gc(v8::CppHeap* heap) {
+  cppgc::testing::StandaloneTestingHeap(heap->GetHeapHandle())
+      .FinalizeGarbageCollection(cppgc::EmbedderStackState::kNoHeapPointers);
+}
+
+void cppgc__testing__set_main_thread_marking(v8::CppHeap* heap,
+                                             bool enabled) {
+  cppgc::testing::StandaloneTestingHeap(heap->GetHeapHandle())
+      .ToggleMainThreadMarking(enabled);
+}
+
+bool cppgc__testing__is_marking(v8::CppHeap* heap) {
+  return cppgc::subtle::HeapState::IsMarking(heap->GetHeapHandle());
+}
+
+bool cppgc__testing__is_sweeping(v8::CppHeap* heap) {
+  return cppgc::subtle::HeapState::IsSweeping(heap->GetHeapHandle());
 }
 
 void cppgc__Visitor__Trace__Member(cppgc::Visitor* visitor,
