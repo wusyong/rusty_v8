@@ -147,7 +147,7 @@ name = "process"
 
 [[test]]
 name = "build"
-path = "build.rs"
+path = "tests/build.rs"
 
 [[bench]]
 name = "function"

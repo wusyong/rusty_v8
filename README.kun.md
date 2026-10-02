@@ -11,7 +11,7 @@
 ## Why a fork
 
 kun wants to build V8 from source instead of using the prebuilt static
-library (`docs/P3.md` in kun, "Wrapper 的型別資訊"):
+library (`docs/P3.md` in kun, section 2, "Wrapper"):
 
 - **Pointer compression on every platform**: only then does V8 check the
   `Object::wrap` tag on `unwrap`. The prebuilt libraries with pointer
@@ -71,6 +71,17 @@ Code changes are marked with `kun:` comments.
   from source picks gn's `is_debug`. Upstream links `_release_` unless
   `V8_FORCE_DEBUG` is set. kun keeps both builds there (see
   `../rusty_v8_artifacts/README.kun.md`).
+- **No warnings under kun's Rust 1.99** (kun builds this crate with its own
+  toolchain; this repo's `rust-toolchain.toml` still pins upstream's
+  1.91.0):
+  - `src/isolate.rs`: `#[allow(deprecated)]` on `fetch_update`, which 1.99
+    deprecates for `try_update`; `try_update` is still unstable in 1.91, so
+    renaming it would break this repo's own build.
+  - `Cargo.toml`'s `[[test]] build` points at `tests/build.rs`, which
+    includes `build.rs` as a module (`#[path]`). Pointing at `build.rs`
+    itself put the file in two targets (the build script and the test),
+    which Cargo 1.99 warns about. Its unit tests still run:
+    `cargo test --features v8_enable_pointer_compression --test build`.
 - `.gitignore`: `/gen/*.rs`. The build script copies the generated
   binding into `gen/` (from `RUSTY_V8_ARCHIVE`'s directory, or a download);
   upstream only tracks `gen/.gitkeep`, so it showed up as untracked.
