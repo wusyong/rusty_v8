@@ -763,10 +763,7 @@ fn prebuilt_profile() -> &'static str {
   let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
   // Use v8 in release mode unless $V8_FORCE_DEBUG=true
   // Note: we always use the release build on windows.
-  // kun: a RUSTY_V8_ARCHIVE holds our own builds, a debug and a release one,
-  // so pick by cargo's profile there, as a build from source does.
-  let archive_debug = env::var_os("RUSTY_V8_ARCHIVE").is_some() && is_debug();
-  if target_os != "windows" && (env_bool("V8_FORCE_DEBUG") || archive_debug) {
+  if target_os != "windows" && env_bool("V8_FORCE_DEBUG") {
     "debug"
   } else {
     "release"

@@ -32,7 +32,11 @@ kun builds V8 from this fork (kun's `docs/P3.md`, decision 10). macOS,
 minutes; kun's tests and `scripts/ci.py matrix` pass against it, and
 `unwrap` checks the wrap tag (kun's `bindings` test
 `unwrap_checks_the_wrap_tag`). kun keeps a debug and a release build (see
-`../rusty_v8_artifacts/README.kun.md`). Windows not tried yet.
+`../rusty_v8_artifacts/README.kun.md`) and, as upstream does with
+`RUSTY_V8_ARCHIVE`, links the release one unless `V8_FORCE_DEBUG=1` is set.
+Until 2026-10-02 `build.rs` picked by cargo's profile instead, so kun's
+tests linked the debug V8; that change is gone (kun's `docs/P3.md`,
+decision 10, has why). Windows not tried yet.
 
 kun builds V8 once with `python3 scripts/ci.py v8` and keeps the result in
 `../rusty_v8_artifacts`; see the README there.
@@ -65,12 +69,6 @@ Code changes are marked with `kun:` comments.
   `kAnyCppHeapPointer` range). `unwrap` only sees objects wrapped with the
   tag it is given, so kun's `dom` uses this to make sure a new wrapper
   wraps nothing yet.
-- **Archive artifacts follow cargo's profile** (`build.rs`,
-  `prebuilt_profile`): with `RUSTY_V8_ARCHIVE` set, a dev build links the
-  `_debug_` library and a `--release` build the `_release_` one, as a build
-  from source picks gn's `is_debug`. Upstream links `_release_` unless
-  `V8_FORCE_DEBUG` is set. kun keeps both builds there (see
-  `../rusty_v8_artifacts/README.kun.md`).
 - **No warnings under kun's Rust 1.99** (kun builds this crate with its own
   toolchain; this repo's `rust-toolchain.toml` still pins upstream's
   1.91.0):
