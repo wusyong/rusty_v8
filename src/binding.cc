@@ -457,6 +457,13 @@ void v8__Isolate__RequestGarbageCollectionForTesting(
   isolate->RequestGarbageCollectionForTesting(type);
 }
 
+// kun: the overload that says whether to scan the stack conservatively.
+void v8__Isolate__RequestGarbageCollectionForTestingWithStackState(
+    v8::Isolate* isolate, v8::Isolate::GarbageCollectionType type,
+    cppgc::EmbedderStackState stack_state) {
+  isolate->RequestGarbageCollectionForTesting(type, stack_state);
+}
+
 void v8__Isolate__CreateParams__CONSTRUCT(
     uninit_t<v8::Isolate::CreateParams>* buf) {
   construct_in_place<v8::Isolate::CreateParams>(buf);

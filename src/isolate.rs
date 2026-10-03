@@ -23,6 +23,7 @@ use crate::binding::v8__HeapSpaceStatistics;
 use crate::binding::v8__HeapStatistics;
 use crate::binding::v8__Isolate__UseCounterFeature;
 pub use crate::binding::v8__ModuleImportPhase as ModuleImportPhase;
+use crate::cppgc::EmbedderStackState;
 use crate::cppgc::Heap;
 use crate::external_references::ExternalReference;
 use crate::function::FunctionCallbackInfo;
@@ -854,6 +855,11 @@ unsafe extern "C" {
   fn v8__Isolate__RequestGarbageCollectionForTesting(
     isolate: *mut RealIsolate,
     r#type: usize,
+  );
+  fn v8__Isolate__RequestGarbageCollectionForTestingWithStackState(
+    isolate: *mut RealIsolate,
+    r#type: usize,
+    stack_state: EmbedderStackState,
   );
 
   fn v8__HeapProfiler__TakeHeapSnapshot(
@@ -2060,6 +2066,29 @@ impl Isolate {
           GarbageCollectionType::Full => 0,
           GarbageCollectionType::Minor => 1,
         },
+      );
+    }
+  }
+
+  /// kun: [`Self::request_garbage_collection_for_testing`], saying whether
+  /// the stack may hold pointers into the heaps. With
+  /// [`EmbedderStackState::NoHeapPointers`] the stack isn't scanned, so a
+  /// stale pointer left on it can't keep garbage alive; only pass it when
+  /// nothing on the stack needs to stay alive.
+  #[inline(always)]
+  pub fn request_garbage_collection_for_testing_with_stack_state(
+    &mut self,
+    r#type: GarbageCollectionType,
+    stack_state: EmbedderStackState,
+  ) {
+    unsafe {
+      v8__Isolate__RequestGarbageCollectionForTestingWithStackState(
+        self.as_real_ptr(),
+        match r#type {
+          GarbageCollectionType::Full => 0,
+          GarbageCollectionType::Minor => 1,
+        },
+        stack_state,
       );
     }
   }

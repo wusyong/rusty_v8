@@ -83,6 +83,14 @@ Code changes are marked with `kun:` comments.
     itself put the file in two targets (the build script and the test),
     which Cargo 1.99 warns about. Its unit tests still run:
     `cargo test --features v8_enable_pointer_compression --test build`.
+- **`Isolate::request_garbage_collection_for_testing_with_stack_state`**
+  (`src/isolate.rs`, `src/binding.cc`): V8's
+  `RequestGarbageCollectionForTesting(type, stack_state)` overload, which
+  upstream doesn't bind. The one-argument version scans the stack
+  conservatively, so a stale pointer a returned call left there can keep
+  garbage alive, depending on the platform's frame layout; kun's
+  `bindings` test `cppgc_traced` failed that way on Windows x64. Its tests
+  GC with `NoHeapPointers` instead.
 - **No PartitionAlloc** (`.gn`, `v8_enable_partition_alloc = false`): V8
   turns it on for non-embedder builds with a shared pointer compression
   cage (`v8/BUILD.gn`), meant for d8, so it came with
