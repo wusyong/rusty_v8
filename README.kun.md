@@ -36,7 +36,10 @@ minutes; kun's tests and `scripts/ci.py matrix` pass against it, and
 `RUSTY_V8_ARCHIVE`, links the release one unless `V8_FORCE_DEBUG=1` is set.
 Until 2026-10-02 `build.rs` picked by cargo's profile instead, so kun's
 tests linked the debug V8; that change is gone (kun's `docs/P3.md`,
-decision 10, has why). Windows not tried yet.
+decision 10, has why). Windows, 2026-10-03: the release build links and
+`cargo build` of kun passes (needs `v8_enable_partition_alloc = false`,
+below); rusty_v8 never builds a debug V8 on Windows (`build.rs`), so
+`V8_FORCE_DEBUG` has no effect there.
 
 kun builds V8 once with `python3 scripts/ci.py v8` and keeps the result in
 `../rusty_v8_artifacts`; see the README there.
@@ -80,6 +83,17 @@ Code changes are marked with `kun:` comments.
     itself put the file in two targets (the build script and the test),
     which Cargo 1.99 warns about. Its unit tests still run:
     `cargo test --features v8_enable_pointer_compression --test build`.
+- **No PartitionAlloc** (`.gn`, `v8_enable_partition_alloc = false`): V8
+  turns it on for non-embedder builds with a shared pointer compression
+  cage (`v8/BUILD.gn`), meant for d8, so it came with
+  `v8_enable_pointer_compression`. Its allocator shim replaces the
+  process's malloc; on Windows the static shim's `malloc`/`free` clash with
+  the UCRT's when kun links C/C++ code that calls them (Skia, aws-lc), and
+  `kun.exe` fails to link with LNK2005. Without it V8 uses the system
+  malloc, like upstream's prebuilt libraries. Its only other use outside
+  d8 is `DefaultPlatform::GetZeroSegmentSize`, now 0: with the V8 sandbox,
+  V8 then reserves the first 4GB itself instead of relying on
+  PartitionAlloc having done so.
 - `.gitignore`: `/gen/*.rs`. The build script copies the generated
   binding into `gen/` (from `RUSTY_V8_ARCHIVE`'s directory, or a download);
   upstream only tracks `gen/.gitkeep`, so it showed up as untracked.

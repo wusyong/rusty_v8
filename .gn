@@ -94,4 +94,11 @@ default_args = {
 
   # Disable C++ modules - they're not compatible with bindgen
   use_clang_modules = false
+
+  # kun: V8 turns PartitionAlloc on for non-embedder builds with a shared
+  # pointer compression cage (v8/BUILD.gn), meant for d8. It brings the
+  # allocator shim, which replaces the whole process's malloc; on Windows its
+  # static shim defines malloc/free and clashes with the UCRT's when the
+  # embedder also has C/C++ code (LNK2005). Embedders use the system malloc.
+  v8_enable_partition_alloc = false
 }
