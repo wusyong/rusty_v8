@@ -39,7 +39,13 @@ tests linked the debug V8; that change is gone (kun's `docs/P3.md`,
 decision 10, has why). Windows, 2026-10-03: the release build links and
 `cargo build` of kun passes (needs `v8_enable_partition_alloc = false`,
 below); rusty_v8 never builds a debug V8 on Windows (`build.rs`), so
-`V8_FORCE_DEBUG` has no effect there.
+`V8_FORCE_DEBUG` has no effect there. Linux x86-64, 2026-10-03, Fedora 44:
+both profiles built against Chromium's sysroot (`use_sysroot = true`,
+below), release in 11 minutes and debug in 14; `bindings`' tests pass
+against each, `unwrap_checks_the_wrap_tag` included. A Linux build needs
+the sysroot fetched once per checkout and bindgen pointed at a Clang 21.1
+or newer (`LIBCLANG_PATH`); the README next to the artifacts has both
+commands.
 
 kun builds V8 once with `python3 scripts/ci.py v8` and keeps the result in
 `../rusty_v8_artifacts`; see the README there.
@@ -102,6 +108,21 @@ Code changes are marked with `kun:` comments.
   d8 is `DefaultPlatform::GetZeroSegmentSize`, now 0: with the V8 sandbox,
   V8 then reserves the first 4GB itself instead of relying on
   PartitionAlloc having done so.
+- **Chromium's sysroot on Linux** (`.gn`, `use_sysroot = true`): upstream
+  builds against the host's headers, which makes the artifact's glibc floor
+  whatever the build machine has -- on Fedora 44 the library wants
+  `__isoc23_strtol` and the other C23 `strtol` symbols, added in glibc 2.38,
+  so RHEL 9, Ubuntu 22.04 and Debian 12 can't link it. Chromium's Debian
+  bullseye sysroot pins the floor at glibc 2.31 wherever the build runs,
+  which the artifacts kun hands to other people need. It also brings glib's
+  pkg-config files: Chromium's Linux compiler config asks pkg-config for
+  glib while parsing its build files, even though no V8 target depends on
+  that config and no V8 source reads `USE_GLIB`, so a host without glib's
+  development package used to fail `gn gen`. A native x86-64 build fetches
+  the sysroot once (`install-sysroot.py --arch=amd64` under
+  `build/linux/sysroot_scripts`); `build.rs` does it on its own only for
+  cross builds, and gn says so if it is missing.
+
 - `.gitignore`: `/gen/*.rs`. The build script copies the generated
   binding into `gen/` (from `RUSTY_V8_ARCHIVE`'s directory, or a download);
   upstream only tracks `gen/.gitkeep`, so it showed up as untracked.
