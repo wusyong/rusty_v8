@@ -4751,6 +4751,156 @@ RustObj* cppgc__make_garbage_collectable(v8::CppHeap* heap, size_t size,
   return nullptr;
 }
 
+// kun: `cppgc__make_garbage_collectable` on an `AllocationHandle`, which a
+// standalone `cppgc::Heap` has too (the function above, as upstream has
+// it, takes a `v8::CppHeap`).
+RustObj* cppgc__make_garbage_collectable_on(cppgc::AllocationHandle* handle,
+                                            size_t size, size_t alignment,
+                                            RustObjInit init, void* data) {
+  if (alignment <= 8) {
+    return cppgc::MakeGarbageCollected<RustObj>(
+        *handle, cppgc::AdditionalBytes(size), init, data);
+  }
+  if (alignment <= 16) {
+    return cppgc::MakeGarbageCollected<RustObjButAlign16>(
+        *handle, cppgc::AdditionalBytes(size), init, data);
+  }
+  return nullptr;
+}
+
+// kun: so one allocation path serves both kinds of heap.
+cppgc::AllocationHandle* v8__CppHeap__GetAllocationHandle(v8::CppHeap* heap) {
+  return &heap->GetAllocationHandle();
+}
+
+// kun: a standalone `cppgc::Heap` (not a `v8::CppHeap`), for `cppgc::
+// standalone` in `src/cppgc/standalone.rs`: cppgc with no isolate,
+// scheduling its own GCs.
+//
+// With `StackSupport::kNoConservativeStackScan`, cppgc starts incremental
+// marking from allocation (it doesn't look at the stack until the end), and
+// runs marking steps, the final pause and incremental sweeping as
+// non-nestable foreground tasks, which run with nothing on the stack
+// (`GCInvoker`, `Marker`, `Sweeper`). The tasks go to Rust through the same
+// callbacks as `CustomPlatform`'s, with a null isolate. Worker jobs
+// (concurrent marking and sweeping) and tracing come from the
+// `v8::Platform`.
+
+class StandaloneHeapTaskRunner final : public cppgc::TaskRunner {
+ public:
+  explicit StandaloneHeapTaskRunner(void* context) : context_(context) {}
+
+  bool IdleTasksEnabled() override { return false; }
+  // Without non-nestable tasks cppgc neither finishes an incremental GC nor
+  // sweeps incrementally on its own.
+  bool NonNestableTasksEnabled() const override { return true; }
+  bool NonNestableDelayedTasksEnabled() const override { return true; }
+
+ protected:
+  void PostTaskImpl(std::unique_ptr<cppgc::Task> task,
+                    const v8::SourceLocation& location) override {
+    v8__Platform__CustomPlatform__BASE__PostTask(context_, nullptr,
+                                                 task.release());
+  }
+  void PostNonNestableTaskImpl(std::unique_ptr<cppgc::Task> task,
+                               const v8::SourceLocation& location) override {
+    v8__Platform__CustomPlatform__BASE__PostNonNestableTask(context_, nullptr,
+                                                            task.release());
+  }
+  void PostDelayedTaskImpl(std::unique_ptr<cppgc::Task> task,
+                           double delay_in_seconds,
+                           const v8::SourceLocation& location) override {
+    v8__Platform__CustomPlatform__BASE__PostDelayedTask(
+        context_, nullptr, task.release(),
+        delay_in_seconds > 0 ? delay_in_seconds : 0.0);
+  }
+  void PostNonNestableDelayedTaskImpl(
+      std::unique_ptr<cppgc::Task> task, double delay_in_seconds,
+      const v8::SourceLocation& location) override {
+    v8__Platform__CustomPlatform__BASE__PostNonNestableDelayedTask(
+        context_, nullptr, task.release(),
+        delay_in_seconds > 0 ? delay_in_seconds : 0.0);
+  }
+
+ private:
+  void* context_;
+};
+
+class StandaloneHeapPlatform final : public cppgc::Platform {
+ public:
+  // `platform` outlives the heap: the Rust side holds a reference to it.
+  StandaloneHeapPlatform(v8::Platform* platform, void* context)
+      : platform_(platform),
+        context_(context),
+        runner_(std::make_shared<StandaloneHeapTaskRunner>(context)) {}
+
+  // The heap owns the platform and destroys it last. Tasks still queued in
+  // Rust then only reach their handles, which the heap's destructor
+  // cancelled.
+  ~StandaloneHeapPlatform() override {
+    v8__Platform__CustomPlatform__BASE__DROP(context_);
+  }
+
+  // The one `cppgc__initialize_process` gives cppgc. Not null, even though
+  // cppgc documents null as "the process's": the sweeper dereferences it.
+  cppgc::PageAllocator* GetPageAllocator() override {
+    return platform_->GetPageAllocator();
+  }
+
+  double MonotonicallyIncreasingTime() override {
+    return platform_->MonotonicallyIncreasingTime();
+  }
+
+  // One runner for every priority: the sweeper asks for a low-priority one
+  // too, and sweeps incrementally only if both take non-nestable tasks.
+  std::shared_ptr<cppgc::TaskRunner> GetForegroundTaskRunner(
+      cppgc::TaskPriority priority) override {
+    return runner_;
+  }
+
+  std::unique_ptr<cppgc::JobHandle> PostJob(
+      cppgc::TaskPriority priority,
+      std::unique_ptr<cppgc::JobTask> job_task) override {
+    return platform_->PostJob(priority, std::move(job_task));
+  }
+
+  cppgc::TracingController* GetTracingController() override {
+    return platform_->GetTracingController();
+  }
+
+ private:
+  v8::Platform* platform_;
+  void* context_;
+  std::shared_ptr<StandaloneHeapTaskRunner> runner_;
+};
+
+cppgc::Heap* cppgc__StandaloneHeap__Create(
+    v8::Platform* platform, void* context,
+    cppgc::Heap::MarkingType marking_support,
+    cppgc::Heap::SweepingType sweeping_support) {
+  cppgc::Heap::HeapOptions options;
+  options.stack_support = cppgc::Heap::StackSupport::kNoConservativeStackScan;
+  options.marking_support = marking_support;
+  options.sweeping_support = sweeping_support;
+  return cppgc::Heap::Create(
+             std::make_shared<StandaloneHeapPlatform>(platform, context),
+             std::move(options))
+      .release();
+}
+
+void cppgc__StandaloneHeap__DELETE(cppgc::Heap* heap) { delete heap; }
+
+cppgc::AllocationHandle* cppgc__StandaloneHeap__GetAllocationHandle(
+    cppgc::Heap* heap) {
+  return &heap->GetAllocationHandle();
+}
+
+// An atomic GC, sweeping included; finishes one that is already marking.
+void cppgc__StandaloneHeap__ForceGarbageCollectionSlow(
+    cppgc::Heap* heap, cppgc::EmbedderStackState stack_state) {
+  heap->ForceGarbageCollectionSlow("kun", "forced", stack_state);
+}
+
 // kun: cppgc's public testing API, for `cppgc::testing` in `src/cppgc/
 // testing.rs`. Only valid on a heap attached to no isolate.
 

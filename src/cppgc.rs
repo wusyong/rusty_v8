@@ -15,9 +15,10 @@ use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
-// kun: GC pointer slots sound under concurrent marking, and test-only GC
-// control; see each module.
+// kun: GC pointer slots sound under concurrent marking, test-only GC
+// control, and a heap with no isolate; see each module.
 mod slot;
+pub mod standalone;
 pub mod testing;
 pub use slot::{MemberSlot, TracedSlot, WeakMemberSlot};
 
@@ -34,6 +35,16 @@ unsafe extern "C" {
   fn v8__CppHeap__DELETE(heap: *mut Heap);
   fn cppgc__make_garbage_collectable(
     heap: *mut Heap,
+    size: usize,
+    alignment: usize,
+    init: unsafe extern "C" fn(obj: *mut RustObj, data: *mut c_void),
+    data: *mut c_void,
+  ) -> *mut RustObj;
+  // kun: allocation on any heap's `AllocationHandle`.
+  fn v8__CppHeap__GetAllocationHandle(heap: *mut Heap)
+  -> *mut AllocationHandle;
+  fn cppgc__make_garbage_collectable_on(
+    handle: *mut AllocationHandle,
     size: usize,
     alignment: usize,
     init: unsafe extern "C" fn(obj: *mut RustObj, data: *mut c_void),
@@ -303,7 +314,20 @@ impl Heap {
       v8__CppHeap__Terminate(self);
     }
   }
+
+  // kun: see `make_garbage_collected_on`.
+  pub fn allocation_handle(&self) -> &AllocationHandle {
+    // SAFETY: the handle lives as long as the heap.
+    unsafe { &*v8__CppHeap__GetAllocationHandle(self as *const Heap as *mut _) }
+  }
 }
+
+// kun: where a heap allocates (`cppgc::AllocationHandle`). Every kind of
+// heap has one: a `Heap` (`v8::CppHeap`) and a
+// [`standalone::StandaloneHeap`] (`cppgc::Heap`) alike.
+#[repr(C)]
+#[derive(Debug)]
+pub struct AllocationHandle(Opaque);
 
 /// Base trait for objects supporting garbage collection.
 ///
@@ -370,6 +394,58 @@ pub unsafe fn make_garbage_collected<T: GarbageCollected + 'static>(
   heap: &Heap,
   obj: T,
 ) -> UnsafePtr<T> {
+  // kun: shared with `make_garbage_collected_on`.
+  unsafe {
+    allocate(obj, |size, alignment, init, data| {
+      cppgc__make_garbage_collectable(
+        heap as *const Heap as *mut _,
+        size,
+        alignment,
+        init,
+        data,
+      )
+    })
+  }
+}
+
+/// kun: [`make_garbage_collected`] on any heap's [`AllocationHandle`],
+/// a [`standalone::StandaloneHeap`]'s included.
+///
+/// # Safety
+///
+/// As [`make_garbage_collected`]'s.
+pub unsafe fn make_garbage_collected_on<T: GarbageCollected + 'static>(
+  handle: &AllocationHandle,
+  obj: T,
+) -> UnsafePtr<T> {
+  unsafe {
+    allocate(obj, |size, alignment, init, data| {
+      cppgc__make_garbage_collectable_on(
+        handle as *const AllocationHandle as *mut _,
+        size,
+        alignment,
+        init,
+        data,
+      )
+    })
+  }
+}
+
+/// `make_garbage_collectable` is one of the C functions above, given the
+/// additional bytes, the alignment, the `RustObjInit` and its data.
+///
+/// # Safety
+///
+/// As [`make_garbage_collected`]'s.
+unsafe fn allocate<T: GarbageCollected + 'static>(
+  obj: T,
+  make_garbage_collectable: impl FnOnce(
+    usize,
+    usize,
+    unsafe extern "C" fn(obj: *mut RustObj, data: *mut c_void),
+    *mut c_void,
+  ) -> *mut RustObj,
+) -> UnsafePtr<T> {
   const {
     // max alignment in cppgc is 16
     assert!(std::mem::align_of::<T>() <= 16);
@@ -389,15 +465,12 @@ pub unsafe fn make_garbage_collected<T: GarbageCollected + 'static>(
   // store, and a concurrent marker could read the object (including the
   // `dynamic` pointer it calls `trace` through) without synchronizing.
   let mut obj = std::mem::ManuallyDrop::new(obj);
-  let pointer = unsafe {
-    cppgc__make_garbage_collectable(
-      heap as *const Heap as *mut _,
-      additional_bytes,
-      std::mem::align_of::<RustObjConcrete<T>>(),
-      init_rust_obj::<T>,
-      &mut *obj as *mut T as *mut c_void,
-    )
-  };
+  let pointer = make_garbage_collectable(
+    additional_bytes,
+    std::mem::align_of::<RustObjConcrete<T>>(),
+    init_rust_obj::<T>,
+    &mut *obj as *mut T as *mut c_void,
+  );
 
   // Only a bad alignment returns null, and the assertion above rules it
   // out; `obj` was moved into the object by `init_rust_obj`.

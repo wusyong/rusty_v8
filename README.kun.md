@@ -11,7 +11,7 @@
 ## Why a fork
 
 kun wants to build V8 from source instead of using the prebuilt static
-library (`docs/P3.md` in kun, section 2, "Wrapper"):
+library (`rfcs/pre-rfcs/P3.md` in kun, section 2, "Wrapper"):
 
 - **Pointer compression on every platform**: only then does V8 check the
   `Object::wrap` tag on `unwrap`. The prebuilt libraries with pointer
@@ -27,7 +27,7 @@ crate's features); the fork is for the patches.
 
 ## Status
 
-kun builds V8 from this fork (kun's `docs/P3.md`, decision 10). macOS,
+kun builds V8 from this fork (kun's `rfcs/pre-rfcs/P3.md`, decision 10). macOS,
 2026-10-02, Apple M4: built with `v8_enable_pointer_compression` in 23
 minutes; kun's tests and `scripts/ci.py matrix` pass against it, and
 `unwrap` checks the wrap tag (kun's `bindings` test
@@ -35,7 +35,7 @@ minutes; kun's tests and `scripts/ci.py matrix` pass against it, and
 `../rusty_v8_artifacts/README.kun.md`) and, as upstream does with
 `RUSTY_V8_ARCHIVE`, links the release one unless `V8_FORCE_DEBUG=1` is set.
 Until 2026-10-02 `build.rs` picked by cargo's profile instead, so kun's
-tests linked the debug V8; that change is gone (kun's `docs/P3.md`,
+tests linked the debug V8; that change is gone (kun's `rfcs/pre-rfcs/P3.md`,
 decision 10, has why). Windows, 2026-10-03: the release build links and
 `cargo build` of kun passes (needs `v8_enable_partition_alloc = false`,
 below); rusty_v8 never builds a debug V8 on Windows (`build.rs`), so
@@ -106,6 +106,17 @@ Code changes are marked with `kun:` comments.
   `src/binding.cc`): `v8::cppgc::testing` wraps cppgc's
   `StandaloneTestingHeap`, step-by-step marking on a `DetachedHeap`, a heap
   that can't be attached to an isolate.
+- **Standalone cppgc heap** (`src/cppgc/standalone.rs`, `src/cppgc.rs`, C++
+  in `src/binding.cc`; experimental, kun's RFC 0001, Q18):
+  `v8::cppgc::standalone::StandaloneHeap` is a `cppgc::Heap`, not a
+  `v8::CppHeap`, for running with no isolate. It schedules its own GCs and
+  posts them as non-nestable foreground tasks to a `PlatformImpl` (the
+  callbacks `CustomPlatform` uses, with a null isolate), and never scans
+  the stack (`kNoConservativeStackScan`). Objects go on any heap's
+  `AllocationHandle` with `make_garbage_collected_on`
+  (`cppgc__make_garbage_collectable_on`; upstream's
+  `make_garbage_collected` shares its Rust code but still calls its own C
+  function).
 - **`Object::is_wrapping`** (`src/object.rs`, `src/binding.cc`): whether
   an API wrapper wraps anything, whatever the tag (V8's
   `kAnyCppHeapPointer` range). `unwrap` only sees objects wrapped with the
