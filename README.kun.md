@@ -117,6 +117,14 @@ Code changes are marked with `kun:` comments.
   (`cppgc__make_garbage_collectable_on`; upstream's
   `make_garbage_collected` shares its Rust code but still calls its own C
   function).
+- **Objects with a tail** (`src/cppgc.rs`, `src/cppgc/slot.rs`, Rust only;
+  experimental, kun's RFC 0001, Q16): `make_garbage_collected_with_tail_on`
+  allocates more bytes after the object, zeroed in the constructor (so a
+  concurrent marker never reads them unwritten), and `tail_of` finds them
+  from the object's value, e.g. `self` in `trace`. `MemberSlot` and
+  `WeakMemberSlot` are `#[repr(transparent)]`, so one can be placed in a
+  tail by a pointer cast. For variable-length objects such as wasm GC
+  structs and arrays.
 - **`Object::is_wrapping`** (`src/object.rs`, `src/binding.cc`): whether
   an API wrapper wraps anything, whatever the tag (V8's
   `kAnyCppHeapPointer` range). `unwrap` only sees objects wrapped with the

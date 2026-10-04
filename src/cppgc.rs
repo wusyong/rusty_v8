@@ -396,7 +396,7 @@ pub unsafe fn make_garbage_collected<T: GarbageCollected + 'static>(
 ) -> UnsafePtr<T> {
   // kun: shared with `make_garbage_collected_on`.
   unsafe {
-    allocate(obj, |size, alignment, init, data| {
+    allocate(obj, 0, |size, alignment, init, data| {
       cppgc__make_garbage_collectable(
         heap as *const Heap as *mut _,
         size,
@@ -418,8 +418,27 @@ pub unsafe fn make_garbage_collected_on<T: GarbageCollected + 'static>(
   handle: &AllocationHandle,
   obj: T,
 ) -> UnsafePtr<T> {
+  unsafe { make_garbage_collected_with_tail_on(handle, obj, 0) }
+}
+
+/// kun: [`make_garbage_collected_on`] with `tail` more bytes after the
+/// object, zeroed before cppgc can trace it (a zeroed `Member` is null).
+/// They are the object's to use through [`tail_of`]: variable-length
+/// objects, e.g. wasm GC structs and arrays laid out by a type table.
+/// `trace` must trace the `Member`s placed there, and nothing drops them.
+///
+/// # Safety
+///
+/// As [`make_garbage_collected`]'s.
+pub unsafe fn make_garbage_collected_with_tail_on<
+  T: GarbageCollected + 'static,
+>(
+  handle: &AllocationHandle,
+  obj: T,
+  tail: usize,
+) -> UnsafePtr<T> {
   unsafe {
-    allocate(obj, |size, alignment, init, data| {
+    allocate(obj, tail, |size, alignment, init, data| {
       cppgc__make_garbage_collectable_on(
         handle as *const AllocationHandle as *mut _,
         size,
@@ -439,6 +458,7 @@ pub unsafe fn make_garbage_collected_on<T: GarbageCollected + 'static>(
 /// As [`make_garbage_collected`]'s.
 unsafe fn allocate<T: GarbageCollected + 'static>(
   obj: T,
+  tail: usize,
   make_garbage_collectable: impl FnOnce(
     usize,
     usize,
@@ -455,8 +475,9 @@ unsafe fn allocate<T: GarbageCollected + 'static>(
     );
   }
 
-  let additional_bytes =
-    std::mem::size_of::<RustObjConcrete<T>>() - std::mem::size_of::<RustObj>();
+  let additional_bytes = std::mem::size_of::<RustObjConcrete<T>>()
+    - std::mem::size_of::<RustObj>()
+    + tail;
 
   // kun: the Rust data is written by `init_rust_obj`, which `RustObj`'s
   // constructor calls, so it is published together with the object (see
@@ -465,12 +486,25 @@ unsafe fn allocate<T: GarbageCollected + 'static>(
   // store, and a concurrent marker could read the object (including the
   // `dynamic` pointer it calls `trace` through) without synchronizing.
   let mut obj = std::mem::ManuallyDrop::new(obj);
-  let pointer = make_garbage_collectable(
-    additional_bytes,
-    std::mem::align_of::<RustObjConcrete<T>>(),
-    init_rust_obj::<T>,
-    &mut *obj as *mut T as *mut c_void,
-  );
+  let pointer = if tail == 0 {
+    make_garbage_collectable(
+      additional_bytes,
+      std::mem::align_of::<RustObjConcrete<T>>(),
+      init_rust_obj::<T>,
+      &mut *obj as *mut T as *mut c_void,
+    )
+  } else {
+    let mut data = TailInit {
+      value: &mut *obj as *mut T,
+      tail,
+    };
+    make_garbage_collectable(
+      additional_bytes,
+      std::mem::align_of::<RustObjConcrete<T>>(),
+      init_rust_obj_with_tail::<T>,
+      &mut data as *mut TailInit<T> as *mut c_void,
+    )
+  };
 
   // Only a bad alignment returns null, and the assertion above rules it
   // out; `obj` was moved into the object by `init_rust_obj`.
@@ -499,6 +533,51 @@ unsafe extern "C" fn init_rust_obj<T: GarbageCollected + 'static>(
     let value_ptr = std::ptr::addr_of_mut!((*obj).value);
     value_ptr.write((data as *mut T).read());
     std::ptr::addr_of_mut!((*obj).dynamic).write(value_ptr as _);
+  }
+}
+
+// kun: what `init_rust_obj_with_tail` is given.
+struct TailInit<T> {
+  value: *mut T,
+  tail: usize,
+}
+
+/// kun: `init_rust_obj`, then zeroes the `tail` bytes after the object, in
+/// the constructor too, so a concurrent marker never sees them unwritten.
+///
+/// # Safety
+///
+/// As `init_rust_obj`'s, with `data` a `TailInit<T>`, and the allocation
+/// `tail` bytes longer than a `RustObjConcrete<T>`.
+unsafe extern "C" fn init_rust_obj_with_tail<T: GarbageCollected + 'static>(
+  obj: *mut RustObj,
+  data: *mut c_void,
+) {
+  unsafe {
+    let data = &*(data as *const TailInit<T>);
+    init_rust_obj::<T>(obj, data.value as *mut c_void);
+    (obj as *mut u8)
+      .add(std::mem::size_of::<RustObjConcrete<T>>())
+      .write_bytes(0, data.tail);
+  }
+}
+
+/// kun: the start of the bytes [`make_garbage_collected_with_tail_on`] put
+/// after `value`'s object (aligned to 8, at least). The pointer is derived
+/// from `value`, typically `self` in `trace`, so it reaches past the `T`
+/// it points to: the "container of" pattern, which Tree Borrows accepts
+/// and Stacked Borrows doesn't.
+///
+/// # Safety
+///
+/// `value` is the value of an object made by
+/// `make_garbage_collected_with_tail_on`, and the tail is used within the
+/// length it was made with.
+pub unsafe fn tail_of<T: GarbageCollected>(value: *const T) -> *mut u8 {
+  unsafe {
+    (value as *mut u8)
+      .sub(std::mem::offset_of!(RustObjConcrete<T>, value))
+      .add(std::mem::size_of::<RustObjConcrete<T>>())
   }
 }
 

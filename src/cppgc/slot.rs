@@ -108,6 +108,11 @@ macro_rules! member_slot {
     /// while the heap's thread writes it. Every method that takes `&self`
     /// passes C++ a raw pointer into an `UnsafeCell` and is `unsafe`, with the
     /// thread it may run on in its contract.
+    ///
+    /// Transparent over the C++ object's bytes, so a slot can also be one
+    /// placed in an object's tail (`make_garbage_collected_with_tail_on`),
+    /// referred to by a pointer cast; such a slot is never dropped.
+    #[repr(transparent)]
     pub struct $name<T: GarbageCollected> {
       storage: UnsafeCell<MemberStorage>,
       _phantom: PhantomData<T>,
