@@ -158,10 +158,19 @@ Code changes are marked with `kun:` comments.
 
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
+- **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks
+  0.72.0 and 1.8.1). Built with 0.72.0 on Windows, the generated binding
+  names `RustObj`'s base `Wrappable` without its namespace, and with
+  `v8_enable_pointer_compression` it came out as an empty type: the
+  binding's layout check failed (`size_of::<RustObj>()` 1, C++ 8) and the
+  `v8` crate didn't compile (the `kun-v152.2.0-2` release run,
+  2026-10-04). 0.72.1, which kun's own lockfile had when V8 was first
+  built on Windows, names it `v8_Object_Wrappable`, as 0.72.0 already does
+  on the other platforms.
 - `.gitignore`: `/gen/*.rs`. The build script copies the generated
   binding into `gen/` (from `RUSTY_V8_ARCHIVE`'s directory, or a download
-from `RUSTY_V8_MIRROR`);
-  upstream only tracks `gen/.gitkeep`, so it showed up as untracked.
+  from `RUSTY_V8_MIRROR`); upstream only tracks `gen/.gitkeep`, so it
+  showed up as untracked.
 
 Otherwise `kun` is upstream's `v152.2.0` plus this file.
 
