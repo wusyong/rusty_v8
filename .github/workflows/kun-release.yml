@@ -1,0 +1,130 @@
+# kun: builds the prebuilt V8 kun links (pointer compression on every
+# platform) and attaches it to the GitHub Release of the pushed `kun-v*` tag,
+# under the file names build.rs looks up with RUSTY_V8_MIRROR. Separate from
+# upstream's ci.yml so rebasing onto a new upstream tag doesn't conflict.
+# Run it by hand (workflow_dispatch) to try a build without releasing: the
+# files are then kept as workflow artifacts instead.
+
+name: kun-release
+
+on:
+  push:
+    tags: ["kun-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: create release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+          --verify-tag --title "$GITHUB_REF_NAME"
+          --notes "Prebuilt V8 for kun, built from $GITHUB_SHA with v8_enable_pointer_compression."
+
+  build:
+    name: ${{ matrix.variant }} ${{ matrix.target }}
+    needs: release
+    # Also run by hand, when `release` is skipped.
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ${{ matrix.os }}
+    # GitHub-hosted runners stop a job at 6 hours; V8 takes a few on 4 cores.
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows has no debug V8 (rusty_v8's build.rs always uses release).
+          - { os: windows-2022, target: x86_64-pc-windows-msvc, variant: release }
+          - { os: macos-15, target: aarch64-apple-darwin, variant: release }
+          - { os: macos-15, target: aarch64-apple-darwin, variant: debug }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, variant: release }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, variant: debug }
+    env:
+      V8_FROM_SOURCE: 1
+      # build.rs's prebuilt_features_suffix() for v8_enable_pointer_compression.
+      FEATURES_SUFFIX: _ptrcomp
+
+    steps:
+      - name: Configure git
+        run: git config --global core.symlinks true
+
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Clone repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Download tools/win
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p tools/win
+          curl -fL https://chromium.googlesource.com/chromium/src/tools/win/+archive/faefd1b6fa9eeb033ad6fe60368ccb9bf908cbd0.tar.gz |
+            tar -xz -C tools/win
+
+      - name: Install rust
+        uses: dsherret/rust-toolchain-file@v1
+
+      # bindgen needs libclang 21.1+.
+      - name: Install Clang
+        if: runner.os == 'Linux'
+        run: |
+          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo dd of=/etc/apt/sources.list.d/llvm-toolchain-jammy-21.list
+          curl https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo dd of=/etc/apt/trusted.gpg.d/llvm-snapshot.gpg
+          sudo apt-get update
+          sudo apt-get -qq remove 'clang-*'
+          sudo apt-get install lld-21 clang-21 clang-tools-21 libclang-21-dev -y
+          echo "LIBCLANG_PATH=/usr/lib/llvm-21/lib" >> $GITHUB_ENV
+
+      - name: Set LIBCLANG_PATH (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm@21
+          echo "LIBCLANG_PATH=$(brew --prefix llvm@21)/lib" >> $GITHUB_ENV
+
+      - name: Build
+        shell: bash
+        run: >-
+          cargo build -v --locked --target ${{ matrix.target }}
+          ${{ matrix.variant == 'release' && '--release' || '' }}
+          --features v8_enable_pointer_compression
+
+      - name: Package
+        shell: bash
+        run: |
+          case "${{ matrix.target }}" in
+            *windows*) lib=rusty_v8.lib;  prefix=rusty_v8;    ext=lib ;;
+            *)         lib=librusty_v8.a; prefix=librusty_v8; ext=a ;;
+          esac
+          name="${FEATURES_SUFFIX}_${{ matrix.variant }}_${{ matrix.target }}"
+          out="target/${{ matrix.target }}/${{ matrix.variant }}/gn_out"
+          mkdir -p dist
+          gzip -9c "$out/obj/$lib" > "dist/${prefix}${name}.${ext}.gz"
+          cp "$out/src_binding.rs" "dist/src_binding${name}.rs"
+          ls -l dist
+
+      - name: Upload to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Keep as workflow artifacts
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: v8-${{ matrix.variant }}-${{ matrix.target }}
+          path: dist/*

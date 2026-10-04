@@ -6,7 +6,7 @@
 | Fork | https://github.com/wusyong/rusty_v8 (remote `origin`) |
 | Branch | `kun`, from upstream's tag `v152.2.0` (`2768994`), the `v8` crate version kun uses |
 | License | MIT (`LICENSE`); V8 and the other submodules under their own licenses |
-| Used by | kun's `bindings` and `dom`, by path, with `v8_enable_pointer_compression`; kun links the library built from it (`../rusty_v8_artifacts`) |
+| Used by | kun's `bindings` and `dom`, by path, with `v8_enable_pointer_compression`; kun links the prebuilt library this fork's `kun-release` workflow attaches to its GitHub Releases |
 
 ## Why a fork
 
@@ -47,8 +47,41 @@ the sysroot fetched once per checkout and bindgen pointed at a Clang 21.1
 or newer (`LIBCLANG_PATH`); the README next to the artifacts has both
 commands.
 
-kun builds V8 once with `python3 scripts/ci.py v8` and keeps the result in
-`../rusty_v8_artifacts`; see the README there.
+Since 2026-10-04 kun no longer builds V8 itself by default: it downloads
+the prebuilt library from this fork's GitHub Releases (see "Releases"
+below). Building from source is only for working on the fork; kun's
+`python3 scripts/ci.py v8` does it and says how to link the result.
+
+## Releases
+
+`.github/workflows/kun-release.yml` (ours; upstream's `ci.yml` only
+publishes from `denoland/rusty_v8`) runs when a `kun-v*` tag is pushed. It
+builds V8 from source with `v8_enable_pointer_compression` and attaches the
+static library (gzipped) and the generated binding to that tag's release,
+under the names `build.rs` looks up:
+
+| Target | Profiles |
+| --- | --- |
+| `x86_64-pc-windows-msvc` | release (`build.rs` never uses a debug V8 on Windows) |
+| `aarch64-apple-darwin` | release, debug |
+| `x86_64-unknown-linux-gnu` | release, debug |
+
+kun points `RUSTY_V8_MIRROR` at
+`https://github.com/wusyong/rusty_v8/releases/download` and
+`RUSTY_V8_MIRROR_TAG` at the tag (kun's `.cargo/config.toml`), and checks
+this repository out at the same tag: the Rust side and the library must
+come from the same commit, or the fork's own C functions don't link.
+
+Tags are `kun-v<v8 crate version>-<n>`, e.g. `kun-v152.2.0-1`, with `n`
+counting the releases of the fork on that version. To release:
+
+1. Commit to `kun` and push it.
+2. `git tag kun-v152.2.0-<n+1> && git push origin kun-v152.2.0-<n+1>`.
+3. Wait for the workflow (a few hours; Windows is the slowest), then move
+   kun's `RUSTY_V8_MIRROR_TAG` to the new tag.
+
+Running the workflow by hand (`workflow_dispatch`) builds without
+releasing; the files are kept as the run's artifacts.
 
 ## Local modifications
 
@@ -123,8 +156,11 @@ Code changes are marked with `kun:` comments.
   `build/linux/sysroot_scripts`); `build.rs` does it on its own only for
   cross builds, and gn says so if it is missing.
 
+- **`.github/workflows/kun-release.yml`**: builds and publishes kun's
+  prebuilt V8 (see "Releases").
 - `.gitignore`: `/gen/*.rs`. The build script copies the generated
-  binding into `gen/` (from `RUSTY_V8_ARCHIVE`'s directory, or a download);
+  binding into `gen/` (from `RUSTY_V8_ARCHIVE`'s directory, or a download
+from `RUSTY_V8_MIRROR`);
   upstream only tracks `gen/.gitkeep`, so it showed up as untracked.
 
 Otherwise `kun` is upstream's `v152.2.0` plus this file.
@@ -132,8 +168,15 @@ Otherwise `kun` is upstream's `v152.2.0` plus this file.
 ## Layout and setup
 
 This directory sits next to kun, at `../third_party/rusty_v8` from kun's
-root. The submodules (V8, Chromium's `build`, `buildtools`, clang and
-libc++, ICU...) were fetched with:
+root. Linking the prebuilt library needs only the `v8` submodule (kun's
+`bindings` build script reads V8's sources):
+
+```sh
+git submodule update --init --depth 1 v8
+```
+
+Building from source needs all of them (V8, Chromium's `build`,
+`buildtools`, clang and libc++, ICU...):
 
 ```sh
 git submodule update --init --recursive --depth 1
@@ -151,7 +194,10 @@ Source").
 3. Reapply and recheck the local modifications listed above: upstream's
    changes to `make_garbage_collected`, `RustObj`, and the C functions the
    slots call (`cppgc__Member__*`, `v8__TracedReference__*`).
-4. In kun: rebuild from source, then `cargo test --workspace` and
+4. In kun: rebuild from source (`python3 scripts/ci.py v8`, linked with
+   `RUSTY_V8_ARCHIVE`), then `cargo test --workspace` and
    `python scripts/ci.py matrix`, and recheck the assumptions in
    `crates/dom/soundness.md` (its "需要人工審查的地方" covers a `v8`
    upgrade).
+5. Release it (see "Releases", with `n` back to 1) and point kun at the new
+   tag.
