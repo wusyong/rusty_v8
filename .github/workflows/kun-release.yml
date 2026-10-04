@@ -88,6 +88,12 @@ jobs:
           sudo apt-get install lld-21 clang-21 clang-tools-21 libclang-21-dev -y
           echo "LIBCLANG_PATH=/usr/lib/llvm-21/lib" >> $GITHUB_ENV
 
+      # .gn sets use_sysroot = true; build.rs only fetches the sysroot for
+      # cross builds, so a native x86-64 build has to fetch it itself.
+      - name: Install sysroot
+        if: runner.os == 'Linux'
+        run: python3 build/linux/sysroot_scripts/install-sysroot.py --arch=amd64
+
       - name: Set LIBCLANG_PATH (macOS)
         if: runner.os == 'macOS'
         run: |
