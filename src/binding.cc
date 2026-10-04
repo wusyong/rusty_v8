@@ -1,9 +1,11 @@
 // Copyright 2019-2021 the Deno authors. All rights reserved. MIT license.
 #include <algorithm>
+#include <atomic>  // kun: `WeakObjectTable`
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>  // kun: `WasmGcObject`
 #include <map>
 #include <memory>
 #include <mutex>
@@ -11,7 +13,9 @@
 #include <vector>
 
 #include "cppgc/allocation.h"
+#include "cppgc/heap-consistency.h"  // kun: `WeakObjectTable`
 #include "cppgc/heap-state.h"
+#include "cppgc/liveness-broker.h"  // kun: `WeakObjectTable`
 #include "cppgc/persistent.h"
 #include "cppgc/platform.h"
 #include "cppgc/testing.h"
@@ -4900,6 +4904,303 @@ void cppgc__StandaloneHeap__ForceGarbageCollectionSlow(
     cppgc::Heap* heap, cppgc::EmbedderStackState stack_state) {
   heap->ForceGarbageCollectionSlow("kun", "forced", stack_state);
 }
+
+// kun: wasm GC objects on cppgc, and a weak table of the objects a wasm
+// Store allocated, for `cppgc::wasm_gc` in `src/cppgc/wasm_gc.rs` (kun's
+// RFC 0001, Q15 and Q16). Only with cppgc's pointer compression: a
+// reference field is a 32-bit `Member`.
+//
+// Every `Member` here names its target's class, so cppgc traces it
+// statically: a `WasmGcObject`, a `RustObj` (any Rust GC object, through
+// its virtual `Trace`) or a `WeakObjectTable`. cppgc's mixin path, which
+// finds the trace from the object's header, only works for classes that
+// are mixins (it needs their object start bits), and none of these are.
+#if defined(CPPGC_POINTER_COMPRESSION)
+
+class WasmGcObject;
+using WasmMember = cppgc::Member<WasmGcObject>;
+using HostMember = cppgc::Member<RustObj>;
+static_assert(sizeof(WasmMember) == sizeof(uint32_t));
+static_assert(sizeof(HostMember) == sizeof(uint32_t));
+
+static const void* DecompressMember(uint32_t bits) {
+  return cppgc::internal::CompressedPointer::Decompress(bits);
+}
+
+enum WasmGcRefKind : uint8_t {
+  kWasmGcNoRef = 0,
+  // A `WasmMember`.
+  kWasmGcRef = 1,
+  // An i31 (`value << 1 | 1`) or a `WasmMember`: wasm objects are
+  // 16-aligned, so their compressed pointer (`address >> 3`) has its low
+  // bit clear.
+  kWasmGcAnyRef = 2,
+  // A `HostMember`, e.g. to a DOM node.
+  kWasmGcHostRef = 3,
+};
+
+struct WasmGcRefField {
+  uint32_t offset;
+  uint8_t kind;
+};
+
+// A struct type lists its reference fields; an array type has a non-zero
+// element size and the kind of its elements.
+struct WasmGcType {
+  const WasmGcRefField* refs;
+  size_t ref_count;
+  uint32_t elem_size;
+  uint8_t elem_kind;
+};
+
+// Set once, before the first object, and never freed: markers read it.
+static std::atomic<const WasmGcType*> g_wasm_gc_types{nullptr};
+
+// A wasm struct or array: a type index and a length, then the fields,
+// laid out by the type table. 16-aligned for the i31 tag (above).
+class alignas(16) WasmGcObject final
+    : public cppgc::GarbageCollected<WasmGcObject> {
+ public:
+  // The fields start in the padding `alignas` leaves after the header.
+  static constexpr size_t kFieldsOffset = 8;
+
+  WasmGcObject(uint32_t type, uint32_t length, size_t field_bytes)
+      : type_(type), length_(length) {
+    // In the constructor, so a concurrent marker never reads them
+    // unwritten (cppgc publishes the object after it); zero is a null
+    // `Member`.
+    std::memset(reinterpret_cast<char*>(this) + kFieldsOffset, 0, field_bytes);
+  }
+
+  void Trace(cppgc::Visitor* visitor) const {
+    const WasmGcType& type =
+        g_wasm_gc_types.load(std::memory_order_acquire)[type_];
+    const char* fields = reinterpret_cast<const char*>(this) + kFieldsOffset;
+    if (type.elem_size == 0) {
+      for (size_t i = 0; i < type.ref_count; i++) {
+        TraceField(visitor, fields + type.refs[i].offset, type.refs[i].kind);
+      }
+    } else if (type.elem_kind != kWasmGcNoRef) {
+      for (uint32_t i = 0; i < length_; i++) {
+        TraceField(visitor, fields + size_t{i} * type.elem_size,
+                   type.elem_kind);
+      }
+    }
+  }
+
+ private:
+  static void TraceField(cppgc::Visitor* visitor, const char* slot,
+                         uint8_t kind) {
+    switch (kind) {
+      case kWasmGcRef:
+        visitor->Trace(*reinterpret_cast<const WasmMember*>(slot));
+        return;
+      case kWasmGcHostRef:
+        visitor->Trace(*reinterpret_cast<const HostMember*>(slot));
+        return;
+      case kWasmGcAnyRef: {
+        // One load decides: the heap's thread may store an i31 over a
+        // pointer at any moment, and `Visitor::Trace` would load the slot
+        // again. So a `Member` with what was loaded is traced instead (it
+        // is on this stack, and tracing a strong `Member` keeps nothing of
+        // its address).
+        uint32_t bits =
+            reinterpret_cast<const std::atomic<uint32_t>*>(slot)->load(
+                std::memory_order_relaxed);
+        if (bits == 0 || (bits & 1)) return;
+        WasmMember copy(static_cast<WasmGcObject*>(
+            const_cast<void*>(DecompressMember(bits))));
+        visitor->Trace(copy);
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  uint32_t type_;
+  uint32_t length_;
+};
+static_assert(sizeof(WasmGcObject) == 16);
+
+// The objects a wasm Store allocated and the host objects it was handed
+// (DOM nodes), weakly while the Store isn't running and strongly while it
+// is: during a GC that comes while a Store runs (say V8's, from a JS
+// listener the wasm code dispatched to), everything the Store may hold on
+// its stack stays alive, without knowing what its stack holds.
+//
+// The entries are only touched on the heap's thread: a strong trace on a
+// marker thread is deferred to it, and the weak callback runs in the final
+// pause.
+class WeakObjectTable final : public cppgc::GarbageCollected<WeakObjectTable> {
+ public:
+  void AddWasm(const WasmGcObject* object) {
+    wasm_.push_back(cppgc::internal::CompressedPointer::Compress(object));
+    if (running_.load()) MarkIfMarking(object);
+  }
+
+  void AddHost(const RustObj* object) {
+    host_.push_back(cppgc::internal::CompressedPointer::Compress(object));
+    if (running_.load()) MarkIfMarking(object);
+  }
+
+  void Enter() {
+    // If this GC already traced the table weakly, have it traced again,
+    // now strongly (a Steele barrier). Paired with `Trace`, which stores
+    // `traced_weakly_` before it loads `running_`: one of the two sees the
+    // other.
+    if (running_.fetch_add(1) == 0 && traced_weakly_.load()) {
+      cppgc::subtle::HeapConsistency::WriteBarrierParams params;
+      if (cppgc::subtle::HeapConsistency::GetWriteBarrierType(this, this,
+                                                              params) ==
+          cppgc::subtle::HeapConsistency::WriteBarrierType::kMarking) {
+        cppgc::subtle::HeapConsistency::SteeleWriteBarrier(params, this);
+      }
+    }
+  }
+
+  void Exit() { running_.fetch_sub(1); }
+
+  size_t size() const { return wasm_.size() + host_.size(); }
+
+  void Trace(cppgc::Visitor* visitor) const {
+    visitor->RegisterWeakCallback(&ProcessWeakness, this);
+    traced_weakly_.store(true);
+    if (running_.load() == 0) return;
+    if (visitor->DeferTraceToMutatorThreadIfConcurrent(this, &TraceStrongly,
+                                                       sizeof(*this))) {
+      return;
+    }
+    TraceStrongly(visitor, this);
+  }
+
+ private:
+  // Objects added while the Store runs are marked at once: the table may
+  // have been traced already in this GC.
+  static void MarkIfMarking(const void* object) {
+    cppgc::subtle::HeapConsistency::WriteBarrierParams params;
+    if (cppgc::subtle::HeapConsistency::GetWriteBarrierType(object, object,
+                                                            params) ==
+        cppgc::subtle::HeapConsistency::WriteBarrierType::kMarking) {
+      cppgc::subtle::HeapConsistency::DijkstraWriteBarrier(params, object);
+    }
+  }
+
+  static void TraceStrongly(cppgc::Visitor* visitor, const void* self) {
+    auto* table = static_cast<const WeakObjectTable*>(self);
+    table->traced_weakly_.store(false);
+    for (uint32_t bits : table->wasm_) {
+      WasmMember member(static_cast<WasmGcObject*>(
+          const_cast<void*>(DecompressMember(bits))));
+      visitor->Trace(member);
+    }
+    for (uint32_t bits : table->host_) {
+      HostMember member(
+          static_cast<RustObj*>(const_cast<void*>(DecompressMember(bits))));
+      visitor->Trace(member);
+    }
+  }
+
+  // Drops the dead entries, and duplicate host objects (one handed in
+  // twice; a wasm object is added once, when allocated).
+  static void ProcessWeakness(const cppgc::LivenessBroker& broker,
+                              const void* self) {
+    auto* table =
+        const_cast<WeakObjectTable*>(static_cast<const WeakObjectTable*>(self));
+    std::erase_if(table->wasm_, [&](uint32_t bits) {
+      return !broker.IsHeapObjectAlive(
+          static_cast<const WasmGcObject*>(DecompressMember(bits)));
+    });
+    std::erase_if(table->host_, [&](uint32_t bits) {
+      return !broker.IsHeapObjectAlive(
+          static_cast<const RustObj*>(DecompressMember(bits)));
+    });
+    auto& host = table->host_;
+    std::sort(host.begin(), host.end());
+    host.erase(std::unique(host.begin(), host.end()), host.end());
+    table->traced_weakly_.store(false);
+  }
+
+  std::vector<uint32_t> wasm_;
+  std::vector<uint32_t> host_;
+  std::atomic<uint32_t> running_{0};
+  mutable std::atomic<bool> traced_weakly_{false};
+};
+
+using TableMember = cppgc::Member<WeakObjectTable>;
+
+void cppgc__WasmGc__SetTypes(const WasmGcType* types) {
+  g_wasm_gc_types.store(types, std::memory_order_release);
+}
+
+size_t cppgc__WasmGcObject__FIELDS_OFFSET() {
+  return WasmGcObject::kFieldsOffset;
+}
+
+WasmGcObject* cppgc__WasmGcObject__New(cppgc::AllocationHandle* handle,
+                                       uint32_t type, uint32_t length,
+                                       size_t field_bytes) {
+  size_t extra = field_bytes > 8 ? field_bytes - 8 : 0;
+  return cppgc::MakeGarbageCollected<WasmGcObject>(
+      *handle, cppgc::AdditionalBytes(extra), type, length, field_bytes);
+}
+
+// The three kinds of `Member`, as fields of wasm objects (`Assign`, `Get`)
+// or of Rust GC objects (all of them). `Assign` is an atomic store plus
+// the write barrier; null clears.
+
+void cppgc__WasmMember__CONSTRUCT(void* slot) { new (slot) WasmMember(); }
+void cppgc__WasmMember__DESTRUCT(void* slot) {
+  static_cast<WasmMember*>(slot)->~WasmMember();
+}
+void cppgc__WasmMember__Assign(void* slot, WasmGcObject* object) {
+  *static_cast<WasmMember*>(slot) = object;
+}
+WasmGcObject* cppgc__WasmMember__Get(const void* slot) {
+  return static_cast<const WasmMember*>(slot)->Get();
+}
+void cppgc__Visitor__Trace__WasmMember(cppgc::Visitor* visitor,
+                                       const void* slot) {
+  visitor->Trace(*static_cast<const WasmMember*>(slot));
+}
+
+void cppgc__HostMember__Assign(void* slot, RustObj* object) {
+  *static_cast<HostMember*>(slot) = object;
+}
+RustObj* cppgc__HostMember__Get(const void* slot) {
+  return static_cast<const HostMember*>(slot)->Get();
+}
+
+void cppgc__TableMember__CONSTRUCT(void* slot) { new (slot) TableMember(); }
+void cppgc__TableMember__DESTRUCT(void* slot) {
+  static_cast<TableMember*>(slot)->~TableMember();
+}
+void cppgc__TableMember__Assign(void* slot, WeakObjectTable* table) {
+  *static_cast<TableMember*>(slot) = table;
+}
+void cppgc__Visitor__Trace__TableMember(cppgc::Visitor* visitor,
+                                        const void* slot) {
+  visitor->Trace(*static_cast<const TableMember*>(slot));
+}
+
+WeakObjectTable* cppgc__WeakObjectTable__New(cppgc::AllocationHandle* handle) {
+  return cppgc::MakeGarbageCollected<WeakObjectTable>(*handle);
+}
+void cppgc__WeakObjectTable__AddWasm(WeakObjectTable* table,
+                                     const WasmGcObject* object) {
+  table->AddWasm(object);
+}
+void cppgc__WeakObjectTable__AddHost(WeakObjectTable* table,
+                                     const RustObj* object) {
+  table->AddHost(object);
+}
+void cppgc__WeakObjectTable__Enter(WeakObjectTable* table) { table->Enter(); }
+void cppgc__WeakObjectTable__Exit(WeakObjectTable* table) { table->Exit(); }
+size_t cppgc__WeakObjectTable__Size(const WeakObjectTable* table) {
+  return table->size();
+}
+
+#endif  // defined(CPPGC_POINTER_COMPRESSION)
 
 // kun: cppgc's public testing API, for `cppgc::testing` in `src/cppgc/
 // testing.rs`. Only valid on a heap attached to no isolate.

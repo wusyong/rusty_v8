@@ -117,14 +117,23 @@ Code changes are marked with `kun:` comments.
   (`cppgc__make_garbage_collectable_on`; upstream's
   `make_garbage_collected` shares its Rust code but still calls its own C
   function).
-- **Objects with a tail** (`src/cppgc.rs`, `src/cppgc/slot.rs`, Rust only;
-  experimental, kun's RFC 0001, Q16): `make_garbage_collected_with_tail_on`
-  allocates more bytes after the object, zeroed in the constructor (so a
-  concurrent marker never reads them unwritten), and `tail_of` finds them
-  from the object's value, e.g. `self` in `trace`. `MemberSlot` and
-  `WeakMemberSlot` are `#[repr(transparent)]`, so one can be placed in a
-  tail by a pointer cast. For variable-length objects such as wasm GC
-  structs and arrays.
+- **wasm GC objects and a weak table** (`src/cppgc/wasm_gc.rs`, C++ in
+  `src/binding.cc`; only with pointer compression; experimental, kun's
+  RFC 0001, Q15 and Q16): `WasmGcObject` is a C++ GC object with a type
+  index, a length and its fields, which it traces by a type table the
+  embedder sets (`set_types`). A reference field is a 32-bit `Member` to a
+  wasm object, to a `RustObj` (a host object such as a DOM node), or an
+  i31-or-wasm-object, the reason the objects are 16-aligned. Each `Member`
+  names its target's class: cppgc's mixin path (the trace found from the
+  object's header) only works for mixin classes. `WasmMemberSlot` and
+  `WeakObjectTableSlot` are such `Member`s as fields of Rust GC objects.
+  `WeakObjectTable` holds the objects a wasm Store allocated or was
+  handed: weakly (a weak callback prunes them) while the Store isn't
+  running, strongly while it is, with a Steele barrier when the Store
+  starts running after the table was traced in the same GC and a Dijkstra
+  barrier for objects added while it runs. cppgc's young generation must
+  stay off (it is compiled in, off at run time): its barrier records slots
+  to read back as pointers, and an i31-or-object field may hold an i31.
 - **`Object::is_wrapping`** (`src/object.rs`, `src/binding.cc`): whether
   an API wrapper wraps anything, whatever the tag (V8's
   `kAnyCppHeapPointer` range). `unwrap` only sees objects wrapped with the
