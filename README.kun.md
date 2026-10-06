@@ -119,7 +119,19 @@ Code changes are marked with `kun:` comments.
   function). Dropping the heap runs a precise GC before destroying it
   (2026-10-06): `cppgc::Heap`'s destructor finishes a running GC but
   finalizes none of the objects left, so without it every live object's
-  finalizer (a Rust `Drop`) was skipped.
+  finalizer (a Rust `Drop`) was skipped. `is_marking` and `marking_step`
+  (2026-10-06; `cppgc__StandaloneHeap__MarkingStep`, which includes
+  cppgc's internal `heap.h`) let the embedder post a GC's marking steps
+  after the first: cppgc's `IncrementalMarkingTask` never clears its
+  handle after it ran, so `MarkerBase::ScheduleIncrementalMarkingTask`
+  never posts another, and a GC whose first step doesn't finish marking
+  waits for allocation to reach the atomic GC's limit. A step does what
+  that task does, and finalizes with the config the heap started the GC
+  with (`Heap::FinalizeIncrementalGarbageCollectionIfRunning`; the task's
+  `FinalizeIncrementalGarbageCollectionIfNeeded` is protected). Upstream
+  V8 has the same code; a `CppHeap` doesn't notice, since V8's
+  `IncrementalMarkingJob` drives its marking. kun's `bindings` build
+  script checks the cppgc code this relies on.
 - **wasm GC objects and a weak table** (`src/cppgc/wasm_gc.rs`, C++ in
   `src/binding.cc`; only with pointer compression; experimental, kun's
   RFC 0001, Q15 and Q16): `WasmGcObject` is a C++ GC object with a type

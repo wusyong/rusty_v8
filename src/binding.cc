@@ -34,6 +34,7 @@
 #include "v8-profiler.h"
 #include "v8.h"
 #include "v8/src/flags/flags.h"
+#include "v8/src/heap/cppgc-internal/heap.h"  // kun: standalone heap marking
 #include "v8/src/libplatform/default-platform.h"
 
 using namespace support;
@@ -4912,6 +4913,38 @@ cppgc::AllocationHandle* cppgc__StandaloneHeap__GetAllocationHandle(
 void cppgc__StandaloneHeap__ForceGarbageCollectionSlow(
     cppgc::Heap* heap, cppgc::EmbedderStackState stack_state) {
   heap->ForceGarbageCollectionSlow("kun", "forced", stack_state);
+}
+
+bool cppgc__StandaloneHeap__IsMarking(cppgc::Heap* heap) {
+  return cppgc::subtle::HeapState::IsMarking(heap->GetHeapHandle());
+}
+
+// One step of the incremental marking the heap started, then the GC's atomic
+// pause (sweeping as configured, incremental) once marking has no work left:
+// what `MarkerBase::IncrementalMarkingTask::Run` does. cppgc posts that task
+// once per GC: its handle stays active after it ran, so
+// `MarkerBase::ScheduleIncrementalMarkingTask` never posts the next step, and
+// a GC whose first step doesn't finish marking would wait for allocation to
+// reach the atomic GC's limit. A `CppHeap` doesn't notice: V8's
+// `IncrementalMarkingJob` drives its marking. Here the embedder does, posting
+// this as a task of its own while the heap is marking. Like cppgc's task, it
+// runs with no unrooted GC pointer on the stack, so neither the step nor the
+// pause scans it.
+void cppgc__StandaloneHeap__MarkingStep(cppgc::Heap* heap) {
+  if (!cppgc::subtle::HeapState::IsMarking(heap->GetHeapHandle())) return;
+  if (cppgc::testing::StandaloneTestingHeap(heap->GetHeapHandle())
+          .PerformMarkingStep(cppgc::EmbedderStackState::kNoHeapPointers)) {
+    // The config the heap started the GC with (`HeapGrowing`), but for the
+    // stack state. cppgc's task calls the protected
+    // `FinalizeIncrementalGarbageCollectionIfNeeded`, which keeps that
+    // config whole.
+    cppgc::internal::Heap* internal = cppgc::internal::Heap::From(heap);
+    internal->FinalizeIncrementalGarbageCollectionIfRunning(
+        {cppgc::internal::CollectionType::kMajor,
+         cppgc::EmbedderStackState::kNoHeapPointers,
+         cppgc::internal::GCConfig::MarkingType::kAtomic,
+         internal->sweeping_support()});
+  }
 }
 
 // kun: wasm GC objects on cppgc, and a weak table of the objects a wasm

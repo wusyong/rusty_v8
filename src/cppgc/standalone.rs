@@ -5,12 +5,14 @@
 // attached (`CppHeap::IsGCAllowed`). A standalone `cppgc::Heap` does: by
 // allocation it starts incremental marking, and it runs the marking steps,
 // the final pause and incremental sweeping as non-nestable foreground
-// tasks. The heap is created with `StackSupport::kNoConservativeStackScan`,
-// so cppgc never scans the stack: it collects only in those tasks, which
-// the embedder runs with nothing on the stack. The tasks reach the
-// embedder through a `PlatformImpl`, as a `Platform::new_custom` platform's
-// do, with a null isolate pointer; worker jobs (concurrent marking and
-// sweeping) run on the `Platform`'s threads.
+// tasks; of the marking steps, it posts only a GC's first, and the embedder
+// posts the rest ([`StandaloneHeap::marking_step`]). The heap is created
+// with `StackSupport::kNoConservativeStackScan`, so cppgc never scans the
+// stack: it collects only in those tasks, which the embedder runs with
+// nothing on the stack. The tasks reach the embedder through a
+// `PlatformImpl`, as a `Platform::new_custom` platform's do, with a null
+// isolate pointer; worker jobs (concurrent marking and sweeping) run on the
+// `Platform`'s threads.
 //
 // Objects are allocated with `make_garbage_collected_on` on the heap's
 // `allocation_handle`. `TracedReference`s must stay empty on this heap:
@@ -39,6 +41,8 @@ unsafe extern "C" {
     heap: *mut RawHeap,
     stack_state: EmbedderStackState,
   );
+  fn cppgc__StandaloneHeap__IsMarking(heap: *mut RawHeap) -> bool;
+  fn cppgc__StandaloneHeap__MarkingStep(heap: *mut RawHeap);
 }
 
 /// `cppgc::Heap`.
@@ -109,6 +113,29 @@ impl StandaloneHeap {
         EmbedderStackState::NoHeapPointers,
       )
     }
+  }
+
+  /// Whether a GC is marking.
+  pub fn is_marking(&self) -> bool {
+    // SAFETY: the heap is alive.
+    unsafe { cppgc__StandaloneHeap__IsMarking(self.heap.as_ptr()) }
+  }
+
+  /// One step of the GC that is marking, and its final pause once marking
+  /// is done; nothing if no GC is marking. cppgc posts a GC's first step as
+  /// a task and never the next ones (its task stays registered as pending
+  /// after it ran), so while [`is_marking`](Self::is_marking), the embedder
+  /// runs this as a task of its own, after the heap's: otherwise a GC whose
+  /// first step doesn't finish marking waits for allocation to reach the
+  /// limit of an atomic GC.
+  ///
+  /// # Safety
+  ///
+  /// As for the heap's tasks: on this heap's thread, outside any trace or
+  /// finalizer, with no unrooted GC pointer on the stack.
+  pub unsafe fn marking_step(&self) {
+    // SAFETY: the heap is alive; the rest is the caller's to vouch for.
+    unsafe { cppgc__StandaloneHeap__MarkingStep(self.heap.as_ptr()) }
   }
 }
 
