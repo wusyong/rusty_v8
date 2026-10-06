@@ -4892,7 +4892,16 @@ cppgc::Heap* cppgc__StandaloneHeap__Create(
       .release();
 }
 
-void cppgc__StandaloneHeap__DELETE(cppgc::Heap* heap) { delete heap; }
+// `cppgc::Heap`'s destructor finishes a GC that is marking but doesn't
+// finalize the objects left alive (`HeapBase::Terminate()`, which does, is
+// `CppHeap`'s). The caller has dropped every `Persistent` (standalone.rs),
+// so a precise GC first reclaims and finalizes everything, and no
+// finalizer is skipped.
+void cppgc__StandaloneHeap__DELETE(cppgc::Heap* heap) {
+  heap->ForceGarbageCollectionSlow("kun", "teardown",
+                                   cppgc::EmbedderStackState::kNoHeapPointers);
+  delete heap;
+}
 
 cppgc::AllocationHandle* cppgc__StandaloneHeap__GetAllocationHandle(
     cppgc::Heap* heap) {

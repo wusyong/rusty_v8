@@ -113,10 +113,15 @@ impl StandaloneHeap {
 }
 
 impl Drop for StandaloneHeap {
-  /// Finishes a GC in progress without finalizing live objects. Every
-  /// `Persistent` into the heap must be gone.
+  /// Runs a precise GC (finishing one that is marking), so every object
+  /// left on the heap is finalized, then destroys the heap. `cppgc::Heap`'s
+  /// destructor alone would finalize nothing. Every `Persistent` into the
+  /// heap must be gone, so that GC finds nothing alive; the caller vouches
+  /// for the stack, as for [`collect_garbage`](Self::collect_garbage).
   fn drop(&mut self) {
     // SAFETY: the heap is alive and dropped once; `_platform` outlives it.
+    // No unrooted GC pointer is on the stack: dropping the heap ends any
+    // use of it.
     unsafe { cppgc__StandaloneHeap__DELETE(self.heap.as_ptr()) }
   }
 }

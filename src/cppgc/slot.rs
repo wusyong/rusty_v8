@@ -13,7 +13,9 @@
 //   `operator=`, `GetAtomic` in `Visitor::Trace`, `SetSlotThreadSafe` /
 //   `GetSlotThreadSafe` for `TracedReference`). These slots keep the bytes in
 //   an `UnsafeCell` and hand C++ a raw pointer for every write and trace, as
-//   `AtomicPtr` does.
+//   `AtomicPtr` does. The one Rust reference ever made into them is the
+//   `&AtomicPtr` of `TracedSlot::is_empty`, which, like any reference to an
+//   atomic, allows the concurrent atomic stores C++ makes.
 // - **Alignment.** Upstream's storage is a `[u8; N]`, so it is 1-aligned and
 //   may land at any offset (after a `bool`, in an enum variant). C++
 //   accesses the slot as a `std::atomic`, which must be aligned. These slots

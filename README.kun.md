@@ -116,7 +116,10 @@ Code changes are marked with `kun:` comments.
   `AllocationHandle` with `make_garbage_collected_on`
   (`cppgc__make_garbage_collectable_on`; upstream's
   `make_garbage_collected` shares its Rust code but still calls its own C
-  function).
+  function). Dropping the heap runs a precise GC before destroying it
+  (2026-10-06): `cppgc::Heap`'s destructor finishes a running GC but
+  finalizes none of the objects left, so without it every live object's
+  finalizer (a Rust `Drop`) was skipped.
 - **wasm GC objects and a weak table** (`src/cppgc/wasm_gc.rs`, C++ in
   `src/binding.cc`; only with pointer compression; experimental, kun's
   RFC 0001, Q15 and Q16): `WasmGcObject` is a C++ GC object with a type
