@@ -154,6 +154,26 @@ Code changes are marked with `kun:` comments.
   `kAnyCppHeapPointer` range). `unwrap` only sees objects wrapped with the
   tag it is given, so kun's `dom` uses this to make sure a new wrapper
   wraps nothing yet.
+- **A `Weak` dropped during the isolate's teardown keeps its data**
+  (`src/handle.rs`, `Weak`'s `Drop`; 2026-10-08, found by kun's
+  `scripts/test.py fuzz` under `--stress-compaction`): `OwnedIsolate::drop`
+  disposes the isolate's handle, then runs the guaranteed finalizers, then
+  V8's own teardown. A context with slots has an annex freed by such a
+  finalizer, and the annex holds the `Weak<Context>` that watches the
+  context (and the slots may hold `Weak`s of their own). Dropped there, a
+  `Weak` sees the disposed handle (`get_pointer` returns `None`), so it
+  neither resets its V8 handle nor keeps its `WeakData`, and a GC in V8's
+  teardown called the first pass callback with the freed `WeakData`: an
+  access violation, or V8's `Check failed: node->IsInUse()`. A `Weak` whose
+  pointer is still set now leaks its `WeakData` in that case, as it already
+  does while a second pass is pending, and marks it dropped, so a second
+  pass frees it. The cost is a `WeakData` per weak handle still registered
+  when an isolate goes, if V8 never calls it back. Upstream's `v152.2.0`
+  has the same code. Rust only: the prebuilt library doesn't change. kun's
+  `bindings` test `isolate_teardown` drops an isolate whose context has a
+  slot under `--stress-compaction`; it crashes without this.
+  Not reported upstream yet; kun's `crates/dom/soundness.md` lists it with
+  the other candidates.
 - **No warnings under kun's Rust 1.99** (kun builds this crate with its own
   toolchain; this repo's `rust-toolchain.toml` still pins upstream's
   1.91.0):
