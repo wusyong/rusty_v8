@@ -29,7 +29,7 @@ crate's features); the fork is for the patches.
 
 kun builds V8 from this fork (kun's `rfcs/pre-rfcs/P3.md`, decision 10). macOS,
 2026-10-02, Apple M4: built with `v8_enable_pointer_compression` in 23
-minutes; kun's tests and `scripts/ci.py matrix` pass against it, and
+minutes; kun's tests and `scripts/test.py matrix` pass against it, and
 `unwrap` checks the wrap tag (kun's `bindings` test
 `unwrap_checks_the_wrap_tag`). kun keeps a debug and a release build (see
 `../rusty_v8_artifacts/README.kun.md`) and, as upstream does with
@@ -248,7 +248,7 @@ Source").
    slots call (`cppgc__Member__*`, `v8__TracedReference__*`).
 4. In kun: rebuild from source (`python3 scripts/ci.py v8`, linked with
    `RUSTY_V8_ARCHIVE`), then `cargo test --workspace` and
-   `python scripts/ci.py matrix`, and recheck the assumptions in
+   `python scripts/test.py matrix`, and recheck the assumptions in
    `crates/dom/soundness.md` (its "需要人工審查的地方" covers a `v8`
    upgrade).
 5. Release it (see "Releases", with `n` back to 1) and point kun at the new
