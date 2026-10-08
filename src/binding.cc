@@ -4187,6 +4187,16 @@ struct v8__ValueSerializer__Delegate : public v8::ValueSerializer::Delegate {
     uint32_t result = 0;
     if (!v8__ValueSerializer__Delegate__GetSharedArrayBufferId(
             this, isolate, shared_array_buffer, &result)) {
+      // kun: a delegate that refused by throwing (what Blink's
+      // `V8ScriptValueSerializer` does) has its exception already pending,
+      // and forwarding would throw a second one on top of it, which
+      // `Isolate::Throw` only tolerates for a termination exception (a
+      // debug check in V8). Forward only when nothing was thrown, so "not
+      // implemented" still gets V8's own DataCloneError. The wasm
+      // counterpart below returns Nothing either way.
+      if (isolate->HasPendingException()) {
+        return v8::Nothing<uint32_t>();
+      }
       // Forward to the original method. It'll throw DataCloneError.
       return v8::ValueSerializer::Delegate::GetSharedArrayBufferId(
           isolate, shared_array_buffer);

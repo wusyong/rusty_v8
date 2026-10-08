@@ -174,6 +174,26 @@ Code changes are marked with `kun:` comments.
   slot under `--stress-compaction`; it crashes without this.
   Not reported upstream yet; kun's `crates/dom/soundness.md` lists it with
   the other candidates.
+- **A `ValueSerializer` delegate that refused by throwing isn't asked
+  again** (`src/binding.cc`,
+  `v8__ValueSerializer__Delegate::GetSharedArrayBufferId`; 2026-10-08,
+  found by kun's `scripts/test.py matrix`): upstream turns a `None` from
+  the Rust delegate into a call to
+  `v8::ValueSerializer::Delegate::GetSharedArrayBufferId`, V8's own
+  delegate, which throws a `DataCloneError`. A delegate that refused by
+  throwing — what Blink's `V8ScriptValueSerializer` does, and what kun's
+  `dom_js` does for a `SharedArrayBuffer` in `history.pushState` — already
+  has its exception pending, so that is a second throw on top of it, which
+  `Isolate::Throw` only tolerates for a termination exception: a release
+  V8 keeps the first exception, a debug V8 fails the check
+  (`isolate.cc`'s `DCHECK(IsTerminationException(exception()))`).
+  Forwarding now happens only when nothing is pending, so a delegate that
+  just doesn't implement it still gets V8's own error. The wasm
+  counterpart, `GetWasmModuleTransferId`, returns `Nothing` for `None` and
+  never had this. Upstream's `v152.2.0` has the same code. C++: the
+  prebuilt library changes, so this needs a new release. Not reported
+  upstream yet; kun's `crates/dom/soundness.md` lists it with the other
+  candidates.
 - **No warnings under kun's Rust 1.99** (kun builds this crate with its own
   toolchain; this repo's `rust-toolchain.toml` still pins upstream's
   1.91.0):
