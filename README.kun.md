@@ -11,7 +11,7 @@
 ## Why a fork
 
 kun wants to build V8 from source instead of using the prebuilt static
-library (`rfcs/pre-rfcs/P3.md` in kun, section 2, "Wrapper"):
+library:
 
 - **Pointer compression on every platform**: only then does V8 check the
   `Object::wrap` tag on `unwrap`. The prebuilt libraries with pointer
@@ -27,7 +27,7 @@ crate's features); the fork is for the patches.
 
 ## Status
 
-kun builds V8 from this fork (kun's `rfcs/pre-rfcs/P3.md`, decision 10). macOS,
+kun builds V8 from this fork. macOS,
 2026-10-02, Apple M4: built with `v8_enable_pointer_compression` in 23
 minutes; kun's tests and `scripts/test.py matrix` pass against it, and
 `unwrap` checks the wrap tag (kun's `bindings` test
@@ -35,8 +35,9 @@ minutes; kun's tests and `scripts/test.py matrix` pass against it, and
 `../rusty_v8_artifacts/README.kun.md`) and, as upstream does with
 `RUSTY_V8_ARCHIVE`, links the release one unless `V8_FORCE_DEBUG=1` is set.
 Until 2026-10-02 `build.rs` picked by cargo's profile instead, so kun's
-tests linked the debug V8; that change is gone (kun's `rfcs/pre-rfcs/P3.md`,
-decision 10, has why). Windows, 2026-10-03: the release build links and
+tests linked the debug V8; that change is gone: against the release V8,
+every test binary that starts V8 links and runs measurably faster, with the
+same results. Windows, 2026-10-03: the release build links and
 `cargo build` of kun passes (needs `v8_enable_partition_alloc = false`,
 below); rusty_v8 never builds a debug V8 on Windows (`build.rs`), so
 `V8_FORCE_DEBUG` has no effect there. Linux x86-64, 2026-10-03, Fedora 44:
@@ -107,7 +108,7 @@ Code changes are marked with `kun:` comments.
   `StandaloneTestingHeap`, step-by-step marking on a `DetachedHeap`, a heap
   that can't be attached to an isolate.
 - **Standalone cppgc heap** (`src/cppgc/standalone.rs`, `src/cppgc.rs`, C++
-  in `src/binding.cc`; experimental, kun's RFC 0001, Q18):
+  in `src/binding.cc`; experimental, for wasm scripts with no isolate):
   `v8::cppgc::standalone::StandaloneHeap` is a `cppgc::Heap`, not a
   `v8::CppHeap`, for running with no isolate. It schedules its own GCs and
   posts them as non-nestable foreground tasks to a `PlatformImpl` (the
@@ -133,8 +134,8 @@ Code changes are marked with `kun:` comments.
   `IncrementalMarkingJob` drives its marking. kun's `bindings` build
   script checks the cppgc code this relies on.
 - **wasm GC objects and a weak table** (`src/cppgc/wasm_gc.rs`, C++ in
-  `src/binding.cc`; only with pointer compression; experimental, kun's
-  RFC 0001, Q15 and Q16): `WasmGcObject` is a C++ GC object with a type
+  `src/binding.cc`; only with pointer compression; experimental, for wasm
+  GC on cppgc): `WasmGcObject` is a C++ GC object with a type
   index, a length and its fields, which it traces by a type table the
   embedder sets (`set_types`). A reference field is a 32-bit `Member` to a
   wasm object, to a `RustObj` (a host object such as a DOM node), or an
