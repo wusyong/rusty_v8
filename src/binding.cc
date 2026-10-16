@@ -5316,6 +5316,18 @@ RustObj* cppgc__Member__Get(cppgc::Member<RustObj>* member) {
   return member->Get();
 }
 
+// kun: the base compressed `Member`s are relative to (cppgc's
+// `CageBaseGlobal`, set when the first heap reserves its cage, the same
+// from then on), for Rust to decompress them without a call per read. 0
+// without cppgc's pointer compression.
+uintptr_t cppgc__CageBase() {
+#if defined(CPPGC_POINTER_COMPRESSION)
+  return cppgc::internal::CageBaseGlobal::Get();
+#else
+  return 0;
+#endif
+}
+
 void cppgc__Member__Assign(cppgc::Member<RustObj>* member, RustObj* other) {
   member->operator=(other);
 }

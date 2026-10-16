@@ -268,6 +268,17 @@ Code changes are marked with `kun:` comments.
   fixed 4 MB ring that silently drops the start of a longer trace. Started
   before V8's platform is initialized: V8 registers its events only if
   Perfetto is up by then.
+- **cppgc's reads in Rust** (`src/cppgc/slot.rs`, `src/cppgc.rs`,
+  `src/binding.cc`, `src/binding.hpp`; 2026-10-16): `MemberSlot` and
+  `WeakMemberSlot` decompress their pointer in Rust (sign-extended,
+  shifted by `cppgc__POINTER_COMPRESSION_SHIFT`, masked with the cage base
+  `cppgc__CageBase()` gives once), and `Persistent` and `WeakPersistent`
+  read `PersistentBase`'s raw pointer themselves, instead of a call into C++
+  for each read: C++ inlines both (`Member::Get`, `Persistent::Get`), and in
+  kun these calls were about a tenth of a DOM-heavy page's time. A debug
+  build checks every such read against C++'s. Writes (the write barrier),
+  and making and dropping a `Persistent` (its node holds its address), stay
+  calls.
 
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").

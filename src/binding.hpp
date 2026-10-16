@@ -16,6 +16,16 @@ static size_t v8__ScriptOrigin_SIZE = sizeof(v8::ScriptOrigin);
 static size_t cppgc__Member_SIZE = sizeof(cppgc::Member<RustObj>);
 static size_t cppgc__WeakMember_SIZE = sizeof(cppgc::WeakMember<RustObj>);
 
+// kun: how far a compressed `Member` is shifted (0 without cppgc's pointer
+// compression), for Rust to decompress one itself, as `Member::Get` does
+// inline in C++.
+#if defined(CPPGC_POINTER_COMPRESSION)
+static size_t cppgc__POINTER_COMPRESSION_SHIFT =
+    cppgc::internal::api_constants::kPointerCompressionShift;
+#else
+static size_t cppgc__POINTER_COMPRESSION_SHIFT = 0;
+#endif
+
 static size_t v8__TracedReference_SIZE = sizeof(v8::TracedReference<v8::Data>);
 
 static size_t v8__Eternal_SIZE = sizeof(v8::Eternal<v8::Data>);

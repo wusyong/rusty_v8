@@ -776,9 +776,16 @@ macro_rules! persistent {
 
       impl<T: GarbageCollected> GetRustObj<T> for $name<T> {
         fn get_rust_obj(&self) -> *mut RustObj {
-          unsafe {
-            [< cppgc__ $name __Get >](self.inner)
+          // kun: `Get()` only reads `PersistentBase`'s first field, the raw
+          // pointer (null once a weak one's target is collected, in a GC
+          // pause): read here, without a call into C++. A debug build checks
+          // it against C++'s own.
+          // SAFETY: `inner` is the live `Persistent` this owns.
+          let ptr = unsafe { self.inner.cast::<*mut RustObj>().read() };
+          if cfg!(debug_assertions) {
+            assert_eq!(ptr, unsafe { [< cppgc__ $name __Get >](self.inner) }, "Persistent::Get differs");
           }
+          ptr
         }
       }
     }

@@ -35,7 +35,7 @@ use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::mem::{MaybeUninit, align_of, size_of};
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
 use super::{
   GarbageCollected, GetRustObj, MemberInner, RustObj, UnsafePtr, Visitor,
@@ -50,8 +50,9 @@ use crate::scope::GetIsolate;
 use crate::{Data, Local, PinScope, TracedReference};
 
 // Upstream declares these in `handle.rs`, private to it; the same
-// signatures here.
+// signatures here. `cppgc__CageBase` is the fork's own.
 unsafe extern "C" {
+  fn cppgc__CageBase() -> usize;
   fn v8__TracedReference__CONSTRUCT(this: *mut TracedReference<Data>);
   fn v8__TracedReference__DESTRUCT(this: *mut TracedReference<Data>);
   fn v8__TracedReference__Reset(
@@ -83,6 +84,53 @@ impl AlignedAs for Bytes<4> {
 }
 impl AlignedAs for Bytes<8> {
   type Unit = u64;
+}
+
+/// How far a compressed `Member` is shifted (`kPointerCompressionShift`).
+const COMPRESSION_SHIFT: usize =
+  crate::binding::cppgc__POINTER_COMPRESSION_SHIFT;
+const _: () = assert!((MEMBER_SIZE == 4) == (COMPRESSION_SHIFT != 0));
+
+/// The cage base, once read: it is set when the first heap reserves its
+/// cage, before any `Member` exists, and never changes.
+static CAGE_BASE: AtomicUsize = AtomicUsize::new(0);
+
+#[inline]
+fn cage_base() -> usize {
+  match CAGE_BASE.load(Ordering::Relaxed) {
+    0 => {
+      // SAFETY: only reads a global.
+      let base = unsafe { cppgc__CageBase() };
+      CAGE_BASE.store(base, Ordering::Relaxed);
+      base
+    }
+    base => base,
+  }
+}
+
+/// What a `Member`'s storage points to: `Member::Get`, done here instead of
+/// with a call into C++ for each read (C++ inlines it): a compressed pointer
+/// sign-extended, shifted and masked with the cage base
+/// (`CompressedPointer::Decompress`), which keeps null and the sentinel as
+/// they are; else the pointer itself. A relaxed atomic load, as plain as
+/// C++'s, and race-free with a marker thread's atomic one.
+///
+/// # Safety
+///
+/// `storage` is a live `Member`'s or `WeakMember`'s.
+#[inline]
+unsafe fn load_member(storage: *const MemberStorage) -> *mut RustObj {
+  if MEMBER_SIZE == 4 {
+    // SAFETY: per the caller; aligned like the `u32` it holds.
+    let compressed =
+      unsafe { (*storage.cast::<AtomicU32>()).load(Ordering::Relaxed) };
+    let mask =
+      ((compressed as i32 as i64 as u64) << COMPRESSION_SHIFT) as usize;
+    (mask & cage_base()) as *mut RustObj
+  } else {
+    // SAFETY: per the caller; aligned like the pointer it holds.
+    unsafe { (*storage.cast::<AtomicPtr<RustObj>>()).load(Ordering::Relaxed) }
+  }
 }
 
 /// A `Member`'s bytes, aligned like it. Any other size fails to compile (no
@@ -117,8 +165,9 @@ macro_rules! member_slot {
 
     // SAFETY: the only data is the C++ object in the `UnsafeCell`, and no
     // Rust reference to it is ever created: every access is a C++ call
-    // through a raw pointer. Of those, only `trace` may run off the heap's
-    // thread (on a marker thread), and it only reads, with an atomic load
+    // through a raw pointer, or (`get`, `load_member`) a relaxed atomic load
+    // through one. Of those, only `trace` may run off the heap's thread (on
+    // a marker thread), and it only reads, with an atomic load
     // (`GetAtomic`). Writes (`assign`, `clear`, `copy_from`) are atomic
     // stores (`operator=`'s `SetRawAtomic`) on the heap's thread, which is
     // also the only thread that does the plain reads (`get`, `copy_from`).
@@ -197,11 +246,14 @@ macro_rules! member_slot {
       /// As for `get`, and the pointer must stay on the stack (or be moved
       /// into a root) like any `UnsafePtr`.
       pub unsafe fn get_ptr(&self) -> Option<UnsafePtr<T>> {
-        // SAFETY: a live slot. The read is not atomic, but it is on the
-        // heap's thread, the only one that writes slots (the GC's own
-        // writes, clearing weak slots, happen in a pause); marker threads
-        // only read.
-        let target: *mut RustObj = unsafe { $get(self.raw()) };
+        // SAFETY: a live slot, read on the heap's thread, the only one that
+        // writes slots (the GC's own writes, clearing weak slots, happen in
+        // a pause); marker threads only read.
+        let target = unsafe { load_member(self.storage.get()) };
+        // kun: a debug build checks the read against C++'s own.
+        if cfg!(debug_assertions) {
+          assert_eq!(target, unsafe { $get(self.raw()) }, "Member::Get differs");
+        }
         // A slot only ever points to objects of type `T` (it is typed), and
         // the target is alive per the caller.
         Some(UnsafePtr {
