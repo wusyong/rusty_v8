@@ -239,6 +239,35 @@ Code changes are marked with `kun:` comments.
   the sysroot once (`install-sysroot.py --arch=amd64` under
   `build/linux/sysroot_scripts`); `build.rs` does it on its own only for
   cross builds, and gn says so if it is missing.
+- **V8 built with Perfetto** (`.gn`, `v8_use_perfetto = true`; submodules
+  `third_party/perfetto`, `third_party/protobuf`, `third_party/zlib` and
+  `tools/protoc_wrapper`, each at the commit `v8/DEPS` names; 2026-10-16):
+  as in Chromium, where `v8/gni/v8.gni` turns it on whenever V8 is built
+  with Chromium. Without it, V8's `TRACE_EVENT(...)` and `TRACE_GC*` --
+  its GC phases, compiling, parsing, nearly all of its events -- compile to
+  nothing, and only about a dozen older `TRACE_EVENT0` ones (mostly the
+  snapshot's) reach the platform's `TracingController`; kun wants a trace
+  with V8's events as Chrome's has them. `v8_use_perfetto_json_export` is
+  off (it would build Perfetto's trace processor in to write JSON; V8
+  writes Perfetto's protobuf instead), and so are `enable_js_protobuf` (its
+  rules import Chromium's closure compiler) and `enable_perfetto_zstd`
+  (zstd isn't in `v8/DEPS`; it only compresses whole traces). V8's
+  `v8_libperfetto` still links the part of the trace processor it lists,
+  which wants zlib. Linux x86-64, 2026-10-16: the release library grew from
+  198.8 MB to 217.0 MB. With no tracing session nothing records: each
+  event's call site checks its category's state, as in Chrome.
+- **A Perfetto trace of the process** (`src/kun_trace.cc`, `src/kun_trace.rs`,
+  `src/lib.rs`, `BUILD.gn`; 2026-10-16): `v8::kun_trace` starts Perfetto's
+  in-process backend and one session that streams into a file (a 64 MB
+  ring buffer in kun's use, written out every second; Perfetto's own
+  messages only for errors), with the categories the embedder asks for,
+  and gives the embedder track events of its own (category `kun`, names
+  given at run time) on the thread's track, next to V8's. As Chromium's
+  tracing does for Chrome, for one process. libplatform's
+  `TracingController` (`InitializeForPerfetto`) isn't used: its buffer is a
+  fixed 4 MB ring that silently drops the start of a longer trace. Started
+  before V8's platform is initialized: V8 registers its events only if
+  Perfetto is up by then.
 
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").

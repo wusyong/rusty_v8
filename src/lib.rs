@@ -87,6 +87,7 @@ mod wasm;
 pub mod crdtp;
 pub mod inspector;
 pub mod json;
+pub mod kun_trace; // kun: a Perfetto trace of the process
 pub mod script_compiler;
 pub mod simdutf;
 // This module is intentionally named "V8" rather than "v8" to match the

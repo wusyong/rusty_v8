@@ -118,4 +118,22 @@ default_args = {
   # musl `target_sysroot` branch first, and build.rs already passes
   # `use_sysroot=true` for the other Linux targets.
   use_sysroot = true
+
+  # kun: V8's trace events go through Perfetto's client library, as in
+  # Chromium (v8/gni/v8.gni turns it on whenever V8 is built with Chromium).
+  # Without it, V8's `TRACE_EVENT(...)` and `TRACE_GC*` (GC phases, compile,
+  # parse: nearly all of its events) compile to nothing, and only the dozen
+  # older `TRACE_EVENT0` ones reach the platform's `TracingController`. Needs
+  # `third_party/perfetto` and `third_party/protobuf` (at v8/DEPS' commits).
+  # No JSON export: it would build Perfetto's trace processor in; V8 writes
+  # Perfetto's protobuf, which Perfetto's tools read.
+  v8_use_perfetto = true
+  v8_use_perfetto_json_export = false
+  # Perfetto's protos need no JavaScript, whose rules would import Chromium's
+  # closure compiler.
+  enable_js_protobuf = false
+  # Zstd only compresses and decompresses whole traces, which V8 doesn't; it
+  # isn't in v8/DEPS. (Zlib is, and the part of Perfetto's trace processor
+  # that V8's v8_libperfetto links asks for it: `third_party/zlib`.)
+  enable_perfetto_zstd = false
 }
