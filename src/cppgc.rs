@@ -541,6 +541,29 @@ impl<T: GarbageCollected> UnsafePtr<T> {
   pub unsafe fn as_ref(&self) -> &T {
     unsafe { &*get_value_from_rust_obj(self.pointer.as_ptr()) }
   }
+
+  // kun: the object a reference read from it points into, to root it
+  // without looking it up again.
+  /// The object `value` is the value of: the inverse of
+  /// [`as_ref`](Self::as_ref). The address is computed back from `value`'s;
+  /// its provenance is the object's exposed one (the object's pointer came
+  /// from C++).
+  ///
+  /// # Safety
+  ///
+  /// `value` must be the value of a `T` allocated on a cppgc heap (read
+  /// through a `Member`, `Persistent`, `UnsafePtr`...), not a `T` anywhere
+  /// else.
+  pub unsafe fn from_value(value: &T) -> UnsafePtr<T> {
+    let offset = std::mem::offset_of!(RustObjConcrete<T>, value);
+    let address = (value as *const T).expose_provenance() - offset;
+    let pointer = std::ptr::with_exposed_provenance_mut::<RustObj>(address);
+    UnsafePtr {
+      // SAFETY: an object's address is not null.
+      pointer: unsafe { NonNull::new_unchecked(pointer) },
+      _phantom: PhantomData,
+    }
+  }
 }
 
 impl<T: GarbageCollected> GetRustObj<T> for UnsafePtr<T> {

@@ -280,6 +280,11 @@ Code changes are marked with `kun:` comments.
   and making and dropping a `Persistent` (its node holds its address), stay
   calls.
 
+- **`UnsafePtr::from_value`** (`src/cppgc.rs`; 2026-10-17): the object a
+  `&T` read from the heap is the value of, computed back from its address
+  (`RustObjConcrete` is `#[repr(C)]`; the inverse of `as_ref`), so kun can
+  root a node it reached through an edge without looking it up in a table.
+
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
 - **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks
