@@ -24,6 +24,7 @@ use crate::binding::v8__HeapSpaceStatistics;
 use crate::binding::v8__HeapStatistics;
 use crate::binding::v8__Isolate__UseCounterFeature;
 pub use crate::binding::v8__ModuleImportPhase as ModuleImportPhase;
+use crate::cppgc::EmbedderStackState;
 use crate::cppgc::Heap;
 use crate::external_references::ExternalReference;
 use crate::function::FunctionCallbackInfo;
@@ -876,6 +877,11 @@ unsafe extern "C" {
   fn v8__Isolate__RequestGarbageCollectionForTesting(
     isolate: *mut RealIsolate,
     r#type: usize,
+  );
+  fn v8__Isolate__RequestGarbageCollectionForTestingWithStackState(
+    isolate: *mut RealIsolate,
+    r#type: usize,
+    stack_state: EmbedderStackState,
   );
 
   fn v8__HeapProfiler__TakeHeapSnapshot(
@@ -2133,6 +2139,29 @@ impl Isolate {
     }
   }
 
+  /// kun: [`Self::request_garbage_collection_for_testing`], saying whether
+  /// the stack may hold pointers into the heaps. With
+  /// [`EmbedderStackState::NoHeapPointers`] the stack isn't scanned, so a
+  /// stale pointer left on it can't keep garbage alive; only pass it when
+  /// nothing on the stack needs to stay alive.
+  #[inline(always)]
+  pub fn request_garbage_collection_for_testing_with_stack_state(
+    &mut self,
+    r#type: GarbageCollectionType,
+    stack_state: EmbedderStackState,
+  ) {
+    unsafe {
+      v8__Isolate__RequestGarbageCollectionForTestingWithStackState(
+        self.as_real_ptr(),
+        match r#type {
+          GarbageCollectionType::Full => 0,
+          GarbageCollectionType::Minor => 1,
+        },
+        stack_state,
+      );
+    }
+  }
+
   /// Disposes the isolate.  The isolate must not be entered by any
   /// thread to be disposable.
   pub(crate) unsafe fn dispose(&mut self) {
@@ -2382,6 +2411,9 @@ fn current_thread_id() -> usize {
     // This cold path deliberately avoids `std::thread::current()`: it may run
     // from another TLS destructor, where panicking would abort the process.
     // A relaxed global counter is sufficient because IDs are only compared.
+    // kun: `fetch_update` is deprecated in Rust 1.99 (renamed `try_update`,
+    // which is still unstable in this crate's pinned 1.91).
+    #[allow(deprecated)]
     let id = NEXT_THREAD_ID
       .fetch_update(
         std::sync::atomic::Ordering::Relaxed,

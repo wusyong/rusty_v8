@@ -94,4 +94,46 @@ default_args = {
 
   # Disable C++ modules - they're not compatible with bindgen
   use_clang_modules = false
+
+  # kun: V8 turns PartitionAlloc on for non-embedder builds with a shared
+  # pointer compression cage (v8/BUILD.gn), meant for d8. It brings the
+  # allocator shim, which replaces the whole process's malloc; on Windows its
+  # static shim defines malloc/free and clashes with the UCRT's when the
+  # embedder also has C/C++ code (LNK2005). Embedders use the system malloc.
+  v8_enable_partition_alloc = false
+
+  # kun: build against Chromium's Debian bullseye sysroot instead of the host's
+  # headers (upstream leaves this false). The artifacts kun ships are linked by
+  # other people, and a host build takes its glibc floor from whatever machine
+  # produced it: built on Fedora 44, the library asks for `__isoc23_strtol` and
+  # the other C23 `strtol` symbols, which glibc added in 2.38, so anything older
+  # (RHEL 9, Ubuntu 22.04, Debian 12) cannot link it. The sysroot pins the floor
+  # at its own glibc 2.31 wherever the build runs. It also carries glib's
+  # pkg-config files, which Chromium's Linux compiler config asks for even
+  # though nothing in V8 uses glib, so a host without them no longer breaks
+  # `gn gen`. Native x86-64 needs the sysroot fetched once -- build.rs only does
+  # that for cross builds:
+  #     python3 build/linux/sysroot_scripts/install-sysroot.py --arch=amd64
+  # Cross and musl builds are unaffected: build/config/sysroot.gni takes the
+  # musl `target_sysroot` branch first, and build.rs already passes
+  # `use_sysroot=true` for the other Linux targets.
+  use_sysroot = true
+
+  # kun: V8's trace events go through Perfetto's client library, as in
+  # Chromium (v8/gni/v8.gni turns it on whenever V8 is built with Chromium).
+  # Without it, V8's `TRACE_EVENT(...)` and `TRACE_GC*` (GC phases, compile,
+  # parse: nearly all of its events) compile to nothing, and only the dozen
+  # older `TRACE_EVENT0` ones reach the platform's `TracingController`. Needs
+  # `third_party/perfetto` and `third_party/protobuf` (at v8/DEPS' commits).
+  # No JSON export: it would build Perfetto's trace processor in; V8 writes
+  # Perfetto's protobuf, which Perfetto's tools read.
+  v8_use_perfetto = true
+  v8_use_perfetto_json_export = false
+  # Perfetto's protos need no JavaScript, whose rules would import Chromium's
+  # closure compiler.
+  enable_js_protobuf = false
+  # Zstd only compresses and decompresses whole traces, which V8 doesn't; it
+  # isn't in v8/DEPS. (Zlib is, and the part of Perfetto's trace processor
+  # that V8's v8_libperfetto links asks for it: `third_party/zlib`.)
+  enable_perfetto_zstd = false
 }

@@ -11,8 +11,19 @@ use crate::support::int;
 use std::cell::UnsafeCell;
 use std::ffi::CStr;
 use std::ffi::c_char;
+use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
+
+// kun: GC pointer slots sound under concurrent marking, test-only GC
+// control, a heap with no isolate, and wasm GC objects; see each module.
+mod slot;
+pub mod standalone;
+pub mod testing;
+// Needs cppgc's 32-bit `Member`s, which pointer compression brings.
+#[cfg(feature = "v8_enable_pointer_compression")]
+pub mod wasm_gc;
+pub use slot::{MemberSlot, TracedSlot, WeakMemberSlot};
 
 unsafe extern "C" {
   fn cppgc__initialize_process(platform: *mut Platform);
@@ -29,6 +40,18 @@ unsafe extern "C" {
     heap: *mut Heap,
     size: usize,
     alignment: usize,
+    init: unsafe extern "C" fn(obj: *mut RustObj, data: *mut c_void),
+    data: *mut c_void,
+  ) -> *mut RustObj;
+  // kun: allocation on any heap's `AllocationHandle`.
+  fn v8__CppHeap__GetAllocationHandle(heap: *mut Heap)
+  -> *mut AllocationHandle;
+  fn cppgc__make_garbage_collectable_on(
+    handle: *mut AllocationHandle,
+    size: usize,
+    alignment: usize,
+    init: unsafe extern "C" fn(obj: *mut RustObj, data: *mut c_void),
+    data: *mut c_void,
   ) -> *mut RustObj;
 
   fn cppgc__heap__enable_detached_garbage_collections_for_testing(
@@ -294,7 +317,20 @@ impl Heap {
       v8__CppHeap__Terminate(self);
     }
   }
+
+  // kun: see `make_garbage_collected_on`.
+  pub fn allocation_handle(&self) -> &AllocationHandle {
+    // SAFETY: the handle lives as long as the heap.
+    unsafe { &*v8__CppHeap__GetAllocationHandle(self as *const Heap as *mut _) }
+  }
 }
+
+// kun: where a heap allocates (`cppgc::AllocationHandle`). Every kind of
+// heap has one: a `Heap` (`v8::CppHeap`) and a
+// [`standalone::StandaloneHeap`] (`cppgc::Heap`) alike.
+#[repr(C)]
+#[derive(Debug)]
+pub struct AllocationHandle(Opaque);
 
 /// Base trait for objects supporting garbage collection.
 ///
@@ -361,6 +397,58 @@ pub unsafe fn make_garbage_collected<T: GarbageCollected + 'static>(
   heap: &Heap,
   obj: T,
 ) -> UnsafePtr<T> {
+  // kun: shared with `make_garbage_collected_on`.
+  unsafe {
+    allocate(obj, |size, alignment, init, data| {
+      cppgc__make_garbage_collectable(
+        heap as *const Heap as *mut _,
+        size,
+        alignment,
+        init,
+        data,
+      )
+    })
+  }
+}
+
+/// kun: [`make_garbage_collected`] on any heap's [`AllocationHandle`],
+/// a [`standalone::StandaloneHeap`]'s included.
+///
+/// # Safety
+///
+/// As [`make_garbage_collected`]'s.
+pub unsafe fn make_garbage_collected_on<T: GarbageCollected + 'static>(
+  handle: &AllocationHandle,
+  obj: T,
+) -> UnsafePtr<T> {
+  unsafe {
+    allocate(obj, |size, alignment, init, data| {
+      cppgc__make_garbage_collectable_on(
+        handle as *const AllocationHandle as *mut _,
+        size,
+        alignment,
+        init,
+        data,
+      )
+    })
+  }
+}
+
+/// `make_garbage_collectable` is one of the C functions above, given the
+/// additional bytes, the alignment, the `RustObjInit` and its data.
+///
+/// # Safety
+///
+/// As [`make_garbage_collected`]'s.
+unsafe fn allocate<T: GarbageCollected + 'static>(
+  obj: T,
+  make_garbage_collectable: impl FnOnce(
+    usize,
+    usize,
+    unsafe extern "C" fn(obj: *mut RustObj, data: *mut c_void),
+    *mut c_void,
+  ) -> *mut RustObj,
+) -> UnsafePtr<T> {
   const {
     // max alignment in cppgc is 16
     assert!(std::mem::align_of::<T>() <= 16);
@@ -373,26 +461,47 @@ pub unsafe fn make_garbage_collected<T: GarbageCollected + 'static>(
   let additional_bytes =
     std::mem::size_of::<RustObjConcrete<T>>() - std::mem::size_of::<RustObj>();
 
-  let pointer = unsafe {
-    cppgc__make_garbage_collectable(
-      heap as *const Heap as *mut _,
-      additional_bytes,
-      std::mem::align_of::<RustObjConcrete<T>>(),
-    )
-  };
+  // kun: the Rust data is written by `init_rust_obj`, which `RustObj`'s
+  // constructor calls, so it is published together with the object (see
+  // `RustObjInit` in `support.h`). Writing it after allocation returned,
+  // as upstream does, comes after cppgc's "fully constructed" release
+  // store, and a concurrent marker could read the object (including the
+  // `dynamic` pointer it calls `trace` through) without synchronizing.
+  let mut obj = std::mem::ManuallyDrop::new(obj);
+  let pointer = make_garbage_collectable(
+    additional_bytes,
+    std::mem::align_of::<RustObjConcrete<T>>(),
+    init_rust_obj::<T>,
+    &mut *obj as *mut T as *mut c_void,
+  );
 
+  // Only a bad alignment returns null, and the assertion above rules it
+  // out; `obj` was moved into the object by `init_rust_obj`.
   assert!(!pointer.is_null());
-
-  unsafe {
-    let pointer = &mut *(pointer as *mut RustObjConcrete<T>);
-    let value_ptr = std::ptr::addr_of_mut!(pointer.value);
-    value_ptr.write(obj);
-    std::ptr::addr_of_mut!(pointer.dynamic).write(value_ptr as _);
-  }
 
   UnsafePtr {
     pointer: unsafe { NonNull::new_unchecked(pointer) },
     _phantom: PhantomData,
+  }
+}
+
+/// `RustObjInit` for a `RustObjConcrete<T>`: moves the `T` that `data`
+/// points to into the new object and sets its `dynamic` pointer. Called
+/// from `RustObj`'s constructor, once.
+///
+/// # Safety
+///
+/// `obj` is a `RustObjConcrete<T>` under construction, and `data` points to
+/// a `T` that the caller won't use or drop afterwards.
+unsafe extern "C" fn init_rust_obj<T: GarbageCollected + 'static>(
+  obj: *mut RustObj,
+  data: *mut c_void,
+) {
+  unsafe {
+    let obj = obj as *mut RustObjConcrete<T>;
+    let value_ptr = std::ptr::addr_of_mut!((*obj).value);
+    value_ptr.write((data as *mut T).read());
+    std::ptr::addr_of_mut!((*obj).dynamic).write(value_ptr as _);
   }
 }
 
@@ -431,6 +540,29 @@ impl<T: GarbageCollected> UnsafePtr<T> {
 
   pub unsafe fn as_ref(&self) -> &T {
     unsafe { &*get_value_from_rust_obj(self.pointer.as_ptr()) }
+  }
+
+  // kun: the object a reference read from it points into, to root it
+  // without looking it up again.
+  /// The object `value` is the value of: the inverse of
+  /// [`as_ref`](Self::as_ref). The address is computed back from `value`'s;
+  /// its provenance is the object's exposed one (the object's pointer came
+  /// from C++).
+  ///
+  /// # Safety
+  ///
+  /// `value` must be the value of a `T` allocated on a cppgc heap (read
+  /// through a `Member`, `Persistent`, `UnsafePtr`...), not a `T` anywhere
+  /// else.
+  pub unsafe fn from_value(value: &T) -> UnsafePtr<T> {
+    let offset = std::mem::offset_of!(RustObjConcrete<T>, value);
+    let address = (value as *const T).expose_provenance() - offset;
+    let pointer = std::ptr::with_exposed_provenance_mut::<RustObj>(address);
+    UnsafePtr {
+      // SAFETY: an object's address is not null.
+      pointer: unsafe { NonNull::new_unchecked(pointer) },
+      _phantom: PhantomData,
+    }
   }
 }
 
@@ -667,9 +799,16 @@ macro_rules! persistent {
 
       impl<T: GarbageCollected> GetRustObj<T> for $name<T> {
         fn get_rust_obj(&self) -> *mut RustObj {
-          unsafe {
-            [< cppgc__ $name __Get >](self.inner)
+          // kun: `Get()` only reads `PersistentBase`'s first field, the raw
+          // pointer (null once a weak one's target is collected, in a GC
+          // pause): read here, without a call into C++. A debug build checks
+          // it against C++'s own.
+          // SAFETY: `inner` is the live `Persistent` this owns.
+          let ptr = unsafe { self.inner.cast::<*mut RustObj>().read() };
+          if cfg!(debug_assertions) {
+            assert_eq!(ptr, unsafe { [< cppgc__ $name __Get >](self.inner) }, "Persistent::Get differs");
           }
+          ptr
         }
       }
     }
