@@ -268,6 +268,17 @@ Code changes are marked with `kun:` comments.
   fixed 4 MB ring that silently drops the start of a longer trace. Started
   before V8's platform is initialized: V8 registers its events only if
   Perfetto is up by then.
+- **User Timing in the trace** (`src/kun_trace.cc`, `src/kun_trace.rs`;
+  2026-10-18): `v8::kun_trace::mark` and `measure` write the page's
+  `performance.mark()` and `measure()` as Chrome's trace has them, under
+  Blink's category `blink.user_timing`: a mark is an instant on the
+  thread's track, a measure a slice on a track of its own under the
+  thread's (an id from a counter, so that measures, even of one name,
+  overlap freely), both at the entry's times rather than the call's. The
+  embedder's clock needn't be Perfetto's: times are passed as how long
+  before now (signed, for times in the future), and taken from Perfetto's
+  now. Checked against Chrome for Testing 152's trace of the same calls;
+  no arguments on the events (Chrome's carry `startTime`, `callTime`).
 - **cppgc's reads in Rust** (`src/cppgc/slot.rs`, `src/cppgc.rs`,
   `src/binding.cc`, `src/binding.hpp`; 2026-10-16): `MemberSlot` and
   `WeakMemberSlot` decompress their pointer in Rust (sign-extended,

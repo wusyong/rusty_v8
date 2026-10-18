@@ -5,6 +5,7 @@
 // categories asked for, and the trace streams into a file as it goes. See
 // `src/kun_trace.rs`.
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -25,10 +26,13 @@
 #include "perfetto/tracing/track_event.h"
 #include "protos/perfetto/config/track_event/track_event_config.gen.h"
 
-// The embedder's spans: one category, their names given at run time.
+// The embedder's spans, their names given at run time, and the page's User
+// Timing marks and measures under Blink's category for them.
 PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE(
     kun_trace,
-    perfetto::Category("kun").SetDescription("The embedder's own spans"));
+    perfetto::Category("kun").SetDescription("The embedder's own spans"),
+    perfetto::Category("blink.user_timing")
+        .SetDescription("The page's performance.mark() and measure()"));
 PERFETTO_TRACK_EVENT_STATIC_STORAGE_IN_NAMESPACE(kun_trace);
 
 namespace {
@@ -61,6 +65,18 @@ void CloseFile(int fd) {
 #else
   close(fd);
 #endif
+}
+
+// The ids of the measures' tracks, one a measure.
+std::atomic<uint64_t> next_measure = 1;
+
+// The trace's clock `ago_ns` before `now` (the trace's time): the
+// embedder's own clock needn't be Perfetto's, but both have a now. Negative
+// is in the future; nothing comes before the clock's zero.
+uint64_t TraceTimeAgo(uint64_t now, int64_t ago_ns) {
+  if (ago_ns < 0) return now + (uint64_t{0} - static_cast<uint64_t>(ago_ns));
+  uint64_t ago = static_cast<uint64_t>(ago_ns);
+  return ago < now ? now - ago : 0;
 }
 
 }  // namespace
@@ -133,6 +149,38 @@ void kun__Trace__Begin(const char* name, size_t name_len) {
 void kun__Trace__End() {
   PERFETTO_USE_CATEGORIES_FROM_NAMESPACE_SCOPED(kun_trace);
   TRACE_EVENT_END("kun");
+}
+
+// A User Timing mark, as Blink's `UserTiming` writes one: an instant on this
+// thread's track, at its time (`ago_ns` before now; a mark's time may be
+// given, in the past or the future). `name` as for Begin. Off unless
+// `blink.user_timing` is recorded.
+void kun__Trace__Mark(const char* name, size_t name_len, int64_t ago_ns) {
+  PERFETTO_USE_CATEGORIES_FROM_NAMESPACE_SCOPED(kun_trace);
+  if (!TRACE_EVENT_CATEGORY_ENABLED("blink.user_timing")) return;
+  TRACE_EVENT_INSTANT("blink.user_timing",
+                      perfetto::DynamicString(name, name_len),
+                      TraceTimeAgo(kun_trace::TrackEvent::GetTraceTimeNs(),
+                                   ago_ns));
+}
+
+// A User Timing measure, as Blink writes one: a slice from its start to its
+// end (each so long before now) on a track of its own under this thread's.
+// Measures overlap as they please, even those of a name, which slices on
+// one track can't. An end before the start is written as it is, as Chrome
+// does; on its own track it spoils no other slice.
+void kun__Trace__Measure(const char* name, size_t name_len,
+                         int64_t start_ago_ns, int64_t end_ago_ns) {
+  PERFETTO_USE_CATEGORIES_FROM_NAMESPACE_SCOPED(kun_trace);
+  if (!TRACE_EVENT_CATEGORY_ENABLED("blink.user_timing")) return;
+  // One now for both ends, or the end would be late by the begin's writing.
+  uint64_t now = kun_trace::TrackEvent::GetTraceTimeNs();
+  perfetto::Track track(next_measure.fetch_add(1, std::memory_order_relaxed),
+                        perfetto::ThreadTrack::Current());
+  TRACE_EVENT_BEGIN("blink.user_timing",
+                    perfetto::DynamicString(name, name_len), track,
+                    TraceTimeAgo(now, start_ago_ns));
+  TRACE_EVENT_END("blink.user_timing", track, TraceTimeAgo(now, end_ago_ns));
 }
 
 }  // extern "C"

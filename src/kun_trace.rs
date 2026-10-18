@@ -3,8 +3,8 @@
 //! with `v8_use_perfetto`; the C++ is `src/kun_trace.cc`).
 //!
 //! [`start`] before V8's platform is initialized (V8 registers its events
-//! only once Perfetto is up), [`stop`] at the end; [`begin`] and [`end`]
-//! from any thread in between. With no session nothing is recorded, and V8
+//! only once Perfetto is up), [`stop`] at the end; [`begin`], [`end`],
+//! [`mark`] and [`measure`] from any thread in between. With no session nothing is recorded, and V8
 //! doesn't even register its events.
 
 use std::ffi::CString;
@@ -21,11 +21,18 @@ unsafe extern "C" {
   fn kun__Trace__Stop();
   fn kun__Trace__Begin(name: *const c_char, name_len: usize);
   fn kun__Trace__End();
+  fn kun__Trace__Mark(name: *const c_char, name_len: usize, ago_ns: i64);
+  fn kun__Trace__Measure(
+    name: *const c_char,
+    name_len: usize,
+    start_ago_ns: i64,
+    end_ago_ns: i64,
+  );
 }
 
 /// Starts recording into the file at `path` the track events of
-/// `categories` (V8's, such as `v8` and `devtools.timeline`, and `kun` for
-/// [`begin`]'s spans), through a ring buffer of `buffer_kb` written out
+/// `categories` (V8's, such as `v8` and `devtools.timeline`, `kun` for
+/// [`begin`]'s spans and `blink.user_timing` for [`mark`] and [`measure`]), through a ring buffer of `buffer_kb` written out
 /// every second; what overflows it within a second overwrites the oldest of
 /// that second, counted as data loss in the trace's stats. False if the
 /// file can't be written, `path` isn't UTF-8 (on Windows, the C runtime
@@ -75,4 +82,32 @@ pub fn begin(name: &str) {
 pub fn end() {
   // SAFETY: no arguments.
   unsafe { kun__Trace__End() }
+}
+
+/// A User Timing mark named `name` (category `blink.user_timing`), as
+/// Chrome's trace has one: an instant on this thread's track, `ago_ns`
+/// nanoseconds before now (negative: after). A load and a branch when
+/// `blink.user_timing` isn't being recorded.
+pub fn mark(name: &str, ago_ns: i64) {
+  // SAFETY: as in `begin`.
+  unsafe {
+    kun__Trace__Mark(name.as_ptr() as *const c_char, name.len(), ago_ns)
+  }
+}
+
+/// A User Timing measure named `name` (category `blink.user_timing`), as
+/// Chrome's trace has one: a slice on a track of its own, under this
+/// thread's, from `start_ago_ns` to `end_ago_ns` nanoseconds before now
+/// (negative: after; an end before the start is written as it is). A load
+/// and a branch when `blink.user_timing` isn't being recorded.
+pub fn measure(name: &str, start_ago_ns: i64, end_ago_ns: i64) {
+  // SAFETY: as in `begin`.
+  unsafe {
+    kun__Trace__Measure(
+      name.as_ptr() as *const c_char,
+      name.len(),
+      start_ago_ns,
+      end_ago_ns,
+    )
+  }
 }
