@@ -273,8 +273,9 @@ Code changes are marked with `kun:` comments.
   `performance.mark()` and `measure()` as Chrome's trace has them, under
   Blink's category `blink.user_timing`: a mark is an instant on the
   thread's track, a measure a slice on a track of its own under the
-  thread's (an id from a counter, so that measures, even of one name,
-  overlap freely), both at the entry's times rather than the call's. The
+  thread's (so that measures, even of one name, overlap freely; its id is
+  a count spread by splitmix64, since a track's uuid is its id xored with
+  its parent's and the threads' tracks are a thread id apart), both at the entry's times rather than the call's. The
   embedder's clock needn't be Perfetto's: times are passed as how long
   before now (signed, for times in the future), and taken from Perfetto's
   now. Checked against Chrome for Testing 152's trace of the same calls;

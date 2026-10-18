@@ -67,8 +67,20 @@ void CloseFile(int fd) {
 #endif
 }
 
-// The ids of the measures' tracks, one a measure.
-std::atomic<uint64_t> next_measure = 1;
+// How many measures have had a track.
+std::atomic<uint64_t> measures = 0;
+
+// A new measure's track id, spread over 64 bits (splitmix64 of a count, so
+// never twice): the track's uuid is the id xored with its parent's, and the
+// threads' tracks are uuids a thread id apart, so a small id would name
+// another thread's track. Chrome's ids are hashes too.
+uint64_t NextMeasureTrackId() {
+  uint64_t x = (measures.fetch_add(1, std::memory_order_relaxed) + 1) *
+               0x9e3779b97f4a7c15u;
+  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9u;
+  x = (x ^ (x >> 27)) * 0x94d049bb133111ebu;
+  return x ^ (x >> 31);
+}
 
 // The trace's clock `ago_ns` before `now` (the trace's time): the
 // embedder's own clock needn't be Perfetto's, but both have a now. Negative
@@ -175,7 +187,7 @@ void kun__Trace__Measure(const char* name, size_t name_len,
   if (!TRACE_EVENT_CATEGORY_ENABLED("blink.user_timing")) return;
   // One now for both ends, or the end would be late by the begin's writing.
   uint64_t now = kun_trace::TrackEvent::GetTraceTimeNs();
-  perfetto::Track track(next_measure.fetch_add(1, std::memory_order_relaxed),
+  perfetto::Track track(NextMeasureTrackId(),
                         perfetto::ThreadTrack::Current());
   TRACE_EVENT_BEGIN("blink.user_timing",
                     perfetto::DynamicString(name, name_len), track,
