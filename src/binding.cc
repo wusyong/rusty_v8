@@ -1,9 +1,11 @@
 // Copyright 2019-2021 the Deno authors. All rights reserved. MIT license.
 #include <algorithm>
+#include <atomic>  // kun: `WeakObjectTable`
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>  // kun: `WasmGcObject`
 #include <map>
 #include <memory>
 #include <mutex>
@@ -13,8 +15,12 @@
 #include <vector>
 
 #include "cppgc/allocation.h"
+#include "cppgc/heap-consistency.h"  // kun: `WeakObjectTable`
+#include "cppgc/heap-state.h"
+#include "cppgc/liveness-broker.h"  // kun: `WeakObjectTable`
 #include "cppgc/persistent.h"
 #include "cppgc/platform.h"
+#include "cppgc/testing.h"
 #include "libplatform/libplatform.h"
 #include "support.h"
 #include "unicode/locid.h"
@@ -30,6 +36,7 @@
 #include "v8-profiler.h"
 #include "v8.h"
 #include "v8/src/flags/flags.h"
+#include "v8/src/heap/cppgc-internal/heap.h"  // kun: standalone heap marking
 #include "v8/src/libplatform/default-platform.h"
 
 using namespace support;
@@ -502,6 +509,13 @@ bool v8__Isolate__HasPendingBackgroundTasks(v8::Isolate* isolate) {
 void v8__Isolate__RequestGarbageCollectionForTesting(
     v8::Isolate* isolate, v8::Isolate::GarbageCollectionType type) {
   isolate->RequestGarbageCollectionForTesting(type);
+}
+
+// kun: the overload that says whether to scan the stack conservatively.
+void v8__Isolate__RequestGarbageCollectionForTestingWithStackState(
+    v8::Isolate* isolate, v8::Isolate::GarbageCollectionType type,
+    cppgc::EmbedderStackState stack_state) {
+  isolate->RequestGarbageCollectionForTesting(type, stack_state);
 }
 
 void v8__Isolate__CreateParams__CONSTRUCT(
@@ -4497,6 +4511,16 @@ struct v8__ValueSerializer__Delegate : public v8::ValueSerializer::Delegate {
     uint32_t result = 0;
     if (!v8__ValueSerializer__Delegate__GetSharedArrayBufferId(
             this, isolate, shared_array_buffer, &result)) {
+      // kun: a delegate that refused by throwing (what Blink's
+      // `V8ScriptValueSerializer` does) has its exception already pending,
+      // and forwarding would throw a second one on top of it, which
+      // `Isolate::Throw` only tolerates for a termination exception (a
+      // debug check in V8). Forward only when nothing was thrown, so "not
+      // implemented" still gets V8's own DataCloneError. The wasm
+      // counterpart below returns Nothing either way.
+      if (isolate->HasPendingException()) {
+        return v8::Nothing<uint32_t>();
+      }
       // Forward to the original method. It'll throw DataCloneError.
       return v8::ValueSerializer::Delegate::GetSharedArrayBufferId(
           isolate, shared_array_buffer);
@@ -5002,6 +5026,12 @@ RustObj* v8__Object__Unwrap(v8::Isolate* isolate, const v8::Object& wrapper,
       v8::Object::Unwrap(isolate, ptr_to_local(&wrapper), tag_range));
 }
 
+// kun: `wrapper` is an API wrapper; any tag but the free-entry ones.
+bool v8__Object__IsWrapping(v8::Isolate* isolate, const v8::Object& wrapper) {
+  return v8::Object::Unwrap(isolate, ptr_to_local(&wrapper),
+                            v8::kAnyCppHeapPointer) != nullptr;
+}
+
 void v8__Object__Wrap(v8::Isolate* isolate, const v8::Object& wrapper,
                       RustObj* value, v8::CppHeapPointerTag tag) {
   v8::Object::Wrap(isolate, ptr_to_local(&wrapper), value, tag);
@@ -5041,19 +5071,545 @@ void cppgc__heap__collect_garbage_for_testing(
   heap->CollectGarbageForTesting(stack_state);
 }
 
-class alignas(16) RustObjButAlign16 : public RustObj {};
+class alignas(16) RustObjButAlign16 : public RustObj {
+ public:
+  using RustObj::RustObj;
+};
 
 RustObj* cppgc__make_garbage_collectable(v8::CppHeap* heap, size_t size,
-                                         size_t alignment) {
+                                         size_t alignment, RustObjInit init,
+                                         void* data) {
   if (alignment <= 8) {
-    return cppgc::MakeGarbageCollected<RustObj>(heap->GetAllocationHandle(),
-                                                cppgc::AdditionalBytes(size));
+    return cppgc::MakeGarbageCollected<RustObj>(
+        heap->GetAllocationHandle(), cppgc::AdditionalBytes(size), init, data);
   }
   if (alignment <= 16) {
     return cppgc::MakeGarbageCollected<RustObjButAlign16>(
-        heap->GetAllocationHandle(), cppgc::AdditionalBytes(size));
+        heap->GetAllocationHandle(), cppgc::AdditionalBytes(size), init, data);
   }
   return nullptr;
+}
+
+// kun: `cppgc__make_garbage_collectable` on an `AllocationHandle`, which a
+// standalone `cppgc::Heap` has too (the function above, as upstream has
+// it, takes a `v8::CppHeap`).
+RustObj* cppgc__make_garbage_collectable_on(cppgc::AllocationHandle* handle,
+                                            size_t size, size_t alignment,
+                                            RustObjInit init, void* data) {
+  if (alignment <= 8) {
+    return cppgc::MakeGarbageCollected<RustObj>(
+        *handle, cppgc::AdditionalBytes(size), init, data);
+  }
+  if (alignment <= 16) {
+    return cppgc::MakeGarbageCollected<RustObjButAlign16>(
+        *handle, cppgc::AdditionalBytes(size), init, data);
+  }
+  return nullptr;
+}
+
+// kun: so one allocation path serves both kinds of heap.
+cppgc::AllocationHandle* v8__CppHeap__GetAllocationHandle(v8::CppHeap* heap) {
+  return &heap->GetAllocationHandle();
+}
+
+// kun: a standalone `cppgc::Heap` (not a `v8::CppHeap`), for `cppgc::
+// standalone` in `src/cppgc/standalone.rs`: cppgc with no isolate,
+// scheduling its own GCs.
+//
+// With `StackSupport::kNoConservativeStackScan`, cppgc starts incremental
+// marking from allocation (it doesn't look at the stack until the end), and
+// runs marking steps, the final pause and incremental sweeping as
+// non-nestable foreground tasks, which run with nothing on the stack
+// (`GCInvoker`, `Marker`, `Sweeper`). The tasks go to Rust through the same
+// callbacks as `CustomPlatform`'s, with a null isolate. Worker jobs
+// (concurrent marking and sweeping) and tracing come from the
+// `v8::Platform`.
+
+class StandaloneHeapTaskRunner final : public cppgc::TaskRunner {
+ public:
+  explicit StandaloneHeapTaskRunner(void* context) : context_(context) {}
+
+  bool IdleTasksEnabled() override { return false; }
+  // Without non-nestable tasks cppgc neither finishes an incremental GC nor
+  // sweeps incrementally on its own.
+  bool NonNestableTasksEnabled() const override { return true; }
+  bool NonNestableDelayedTasksEnabled() const override { return true; }
+
+ protected:
+  void PostTaskImpl(std::unique_ptr<cppgc::Task> task,
+                    const v8::SourceLocation& location) override {
+    v8__Platform__CustomPlatform__BASE__PostTask(context_, nullptr,
+                                                 task.release());
+  }
+  void PostNonNestableTaskImpl(std::unique_ptr<cppgc::Task> task,
+                               const v8::SourceLocation& location) override {
+    v8__Platform__CustomPlatform__BASE__PostNonNestableTask(context_, nullptr,
+                                                            task.release());
+  }
+  void PostDelayedTaskImpl(std::unique_ptr<cppgc::Task> task,
+                           double delay_in_seconds,
+                           const v8::SourceLocation& location) override {
+    v8__Platform__CustomPlatform__BASE__PostDelayedTask(
+        context_, nullptr, task.release(),
+        delay_in_seconds > 0 ? delay_in_seconds : 0.0);
+  }
+  void PostNonNestableDelayedTaskImpl(
+      std::unique_ptr<cppgc::Task> task, double delay_in_seconds,
+      const v8::SourceLocation& location) override {
+    v8__Platform__CustomPlatform__BASE__PostNonNestableDelayedTask(
+        context_, nullptr, task.release(),
+        delay_in_seconds > 0 ? delay_in_seconds : 0.0);
+  }
+
+ private:
+  void* context_;
+};
+
+class StandaloneHeapPlatform final : public cppgc::Platform {
+ public:
+  // `platform` outlives the heap: the Rust side holds a reference to it.
+  StandaloneHeapPlatform(v8::Platform* platform, void* context)
+      : platform_(platform),
+        context_(context),
+        runner_(std::make_shared<StandaloneHeapTaskRunner>(context)) {}
+
+  // The heap owns the platform and destroys it last. Tasks still queued in
+  // Rust then only reach their handles, which the heap's destructor
+  // cancelled.
+  ~StandaloneHeapPlatform() override {
+    v8__Platform__CustomPlatform__BASE__DROP(context_);
+  }
+
+  // The one `cppgc__initialize_process` gives cppgc. Not null, even though
+  // cppgc documents null as "the process's": the sweeper dereferences it.
+  cppgc::PageAllocator* GetPageAllocator() override {
+    return platform_->GetPageAllocator();
+  }
+
+  double MonotonicallyIncreasingTime() override {
+    return platform_->MonotonicallyIncreasingTime();
+  }
+
+  // One runner for every priority: the sweeper asks for a low-priority one
+  // too, and sweeps incrementally only if both take non-nestable tasks.
+  std::shared_ptr<cppgc::TaskRunner> GetForegroundTaskRunner(
+      cppgc::TaskPriority priority) override {
+    return runner_;
+  }
+
+  std::unique_ptr<cppgc::JobHandle> PostJob(
+      cppgc::TaskPriority priority,
+      std::unique_ptr<cppgc::JobTask> job_task) override {
+    return platform_->PostJob(priority, std::move(job_task));
+  }
+
+  cppgc::TracingController* GetTracingController() override {
+    return platform_->GetTracingController();
+  }
+
+ private:
+  v8::Platform* platform_;
+  void* context_;
+  std::shared_ptr<StandaloneHeapTaskRunner> runner_;
+};
+
+cppgc::Heap* cppgc__StandaloneHeap__Create(
+    v8::Platform* platform, void* context,
+    cppgc::Heap::MarkingType marking_support,
+    cppgc::Heap::SweepingType sweeping_support) {
+  cppgc::Heap::HeapOptions options;
+  options.stack_support = cppgc::Heap::StackSupport::kNoConservativeStackScan;
+  options.marking_support = marking_support;
+  options.sweeping_support = sweeping_support;
+  return cppgc::Heap::Create(
+             std::make_shared<StandaloneHeapPlatform>(platform, context),
+             std::move(options))
+      .release();
+}
+
+// `cppgc::Heap`'s destructor finishes a GC that is marking but doesn't
+// finalize the objects left alive (`HeapBase::Terminate()`, which does, is
+// `CppHeap`'s). The caller has dropped every `Persistent` (standalone.rs),
+// so a precise GC first reclaims and finalizes everything, and no
+// finalizer is skipped.
+void cppgc__StandaloneHeap__DELETE(cppgc::Heap* heap) {
+  heap->ForceGarbageCollectionSlow("kun", "teardown",
+                                   cppgc::EmbedderStackState::kNoHeapPointers);
+  delete heap;
+}
+
+cppgc::AllocationHandle* cppgc__StandaloneHeap__GetAllocationHandle(
+    cppgc::Heap* heap) {
+  return &heap->GetAllocationHandle();
+}
+
+// An atomic GC, sweeping included; finishes one that is already marking.
+void cppgc__StandaloneHeap__ForceGarbageCollectionSlow(
+    cppgc::Heap* heap, cppgc::EmbedderStackState stack_state) {
+  heap->ForceGarbageCollectionSlow("kun", "forced", stack_state);
+}
+
+bool cppgc__StandaloneHeap__IsMarking(cppgc::Heap* heap) {
+  return cppgc::subtle::HeapState::IsMarking(heap->GetHeapHandle());
+}
+
+// One step of the incremental marking the heap started, then the GC's atomic
+// pause (sweeping as configured, incremental) once marking has no work left:
+// what `MarkerBase::IncrementalMarkingTask::Run` does. cppgc posts that task
+// once per GC: its handle stays active after it ran, so
+// `MarkerBase::ScheduleIncrementalMarkingTask` never posts the next step, and
+// a GC whose first step doesn't finish marking would wait for allocation to
+// reach the atomic GC's limit. A `CppHeap` doesn't notice: V8's
+// `IncrementalMarkingJob` drives its marking. Here the embedder does, posting
+// this as a task of its own while the heap is marking. Like cppgc's task, it
+// runs with no unrooted GC pointer on the stack, so neither the step nor the
+// pause scans it.
+void cppgc__StandaloneHeap__MarkingStep(cppgc::Heap* heap) {
+  if (!cppgc::subtle::HeapState::IsMarking(heap->GetHeapHandle())) return;
+  if (cppgc::testing::StandaloneTestingHeap(heap->GetHeapHandle())
+          .PerformMarkingStep(cppgc::EmbedderStackState::kNoHeapPointers)) {
+    // The config the heap started the GC with (`HeapGrowing`), but for the
+    // stack state. cppgc's task calls the protected
+    // `FinalizeIncrementalGarbageCollectionIfNeeded`, which keeps that
+    // config whole.
+    cppgc::internal::Heap* internal = cppgc::internal::Heap::From(heap);
+    internal->FinalizeIncrementalGarbageCollectionIfRunning(
+        {cppgc::internal::CollectionType::kMajor,
+         cppgc::EmbedderStackState::kNoHeapPointers,
+         cppgc::internal::GCConfig::MarkingType::kAtomic,
+         internal->sweeping_support()});
+  }
+}
+
+// kun: wasm GC objects on cppgc, and a weak table of the objects a wasm
+// Store allocated, for `cppgc::wasm_gc` in `src/cppgc/wasm_gc.rs` (kun's
+// RFC 0001, Q15 and Q16). Only with cppgc's pointer compression: a
+// reference field is a 32-bit `Member`.
+//
+// Every `Member` here names its target's class, so cppgc traces it
+// statically: a `WasmGcObject`, a `RustObj` (any Rust GC object, through
+// its virtual `Trace`) or a `WeakObjectTable`. cppgc's mixin path, which
+// finds the trace from the object's header, only works for classes that
+// are mixins (it needs their object start bits), and none of these are.
+#if defined(CPPGC_POINTER_COMPRESSION)
+
+class WasmGcObject;
+using WasmMember = cppgc::Member<WasmGcObject>;
+using HostMember = cppgc::Member<RustObj>;
+static_assert(sizeof(WasmMember) == sizeof(uint32_t));
+static_assert(sizeof(HostMember) == sizeof(uint32_t));
+
+static const void* DecompressMember(uint32_t bits) {
+  return cppgc::internal::CompressedPointer::Decompress(bits);
+}
+
+enum WasmGcRefKind : uint8_t {
+  kWasmGcNoRef = 0,
+  // A `WasmMember`.
+  kWasmGcRef = 1,
+  // An i31 (`value << 1 | 1`) or a `WasmMember`: wasm objects are
+  // 16-aligned, so their compressed pointer (`address >> 3`) has its low
+  // bit clear.
+  kWasmGcAnyRef = 2,
+  // A `HostMember`, e.g. to a DOM node.
+  kWasmGcHostRef = 3,
+};
+
+struct WasmGcRefField {
+  uint32_t offset;
+  uint8_t kind;
+};
+
+// A struct type lists its reference fields; an array type has a non-zero
+// element size and the kind of its elements.
+struct WasmGcType {
+  const WasmGcRefField* refs;
+  size_t ref_count;
+  uint32_t elem_size;
+  uint8_t elem_kind;
+};
+
+// Set once, before the first object, and never freed: markers read it.
+static std::atomic<const WasmGcType*> g_wasm_gc_types{nullptr};
+
+// A wasm struct or array: a type index and a length, then the fields,
+// laid out by the type table. 16-aligned for the i31 tag (above).
+class alignas(16) WasmGcObject final
+    : public cppgc::GarbageCollected<WasmGcObject> {
+ public:
+  // The fields start in the padding `alignas` leaves after the header.
+  static constexpr size_t kFieldsOffset = 8;
+
+  WasmGcObject(uint32_t type, uint32_t length, size_t field_bytes)
+      : type_(type), length_(length) {
+    // In the constructor, so a concurrent marker never reads them
+    // unwritten (cppgc publishes the object after it); zero is a null
+    // `Member`.
+    std::memset(reinterpret_cast<char*>(this) + kFieldsOffset, 0, field_bytes);
+  }
+
+  void Trace(cppgc::Visitor* visitor) const {
+    const WasmGcType& type =
+        g_wasm_gc_types.load(std::memory_order_acquire)[type_];
+    const char* fields = reinterpret_cast<const char*>(this) + kFieldsOffset;
+    if (type.elem_size == 0) {
+      for (size_t i = 0; i < type.ref_count; i++) {
+        TraceField(visitor, fields + type.refs[i].offset, type.refs[i].kind);
+      }
+    } else if (type.elem_kind != kWasmGcNoRef) {
+      for (uint32_t i = 0; i < length_; i++) {
+        TraceField(visitor, fields + size_t{i} * type.elem_size,
+                   type.elem_kind);
+      }
+    }
+  }
+
+ private:
+  static void TraceField(cppgc::Visitor* visitor, const char* slot,
+                         uint8_t kind) {
+    switch (kind) {
+      case kWasmGcRef:
+        visitor->Trace(*reinterpret_cast<const WasmMember*>(slot));
+        return;
+      case kWasmGcHostRef:
+        visitor->Trace(*reinterpret_cast<const HostMember*>(slot));
+        return;
+      case kWasmGcAnyRef: {
+        // One load decides: the heap's thread may store an i31 over a
+        // pointer at any moment, and `Visitor::Trace` would load the slot
+        // again. So a `Member` with what was loaded is traced instead (it
+        // is on this stack, and tracing a strong `Member` keeps nothing of
+        // its address).
+        uint32_t bits =
+            reinterpret_cast<const std::atomic<uint32_t>*>(slot)->load(
+                std::memory_order_relaxed);
+        if (bits == 0 || (bits & 1)) return;
+        WasmMember copy(static_cast<WasmGcObject*>(
+            const_cast<void*>(DecompressMember(bits))));
+        visitor->Trace(copy);
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  uint32_t type_;
+  uint32_t length_;
+};
+static_assert(sizeof(WasmGcObject) == 16);
+
+// The objects a wasm Store allocated and the host objects it was handed
+// (DOM nodes), weakly while the Store isn't running and strongly while it
+// is: during a GC that comes while a Store runs (say V8's, from a JS
+// listener the wasm code dispatched to), everything the Store may hold on
+// its stack stays alive, without knowing what its stack holds.
+//
+// The entries are only touched on the heap's thread: a strong trace on a
+// marker thread is deferred to it, and the weak callback runs in the final
+// pause.
+class WeakObjectTable final : public cppgc::GarbageCollected<WeakObjectTable> {
+ public:
+  void AddWasm(const WasmGcObject* object) {
+    wasm_.push_back(cppgc::internal::CompressedPointer::Compress(object));
+    if (running_.load()) MarkIfMarking(object);
+  }
+
+  void AddHost(const RustObj* object) {
+    host_.push_back(cppgc::internal::CompressedPointer::Compress(object));
+    if (running_.load()) MarkIfMarking(object);
+  }
+
+  void Enter() {
+    // If this GC already traced the table weakly, have it traced again,
+    // now strongly (a Steele barrier). Paired with `Trace`, which stores
+    // `traced_weakly_` before it loads `running_`: one of the two sees the
+    // other.
+    if (running_.fetch_add(1) == 0 && traced_weakly_.load()) {
+      cppgc::subtle::HeapConsistency::WriteBarrierParams params;
+      if (cppgc::subtle::HeapConsistency::GetWriteBarrierType(this, this,
+                                                              params) ==
+          cppgc::subtle::HeapConsistency::WriteBarrierType::kMarking) {
+        cppgc::subtle::HeapConsistency::SteeleWriteBarrier(params, this);
+      }
+    }
+  }
+
+  void Exit() { running_.fetch_sub(1); }
+
+  size_t size() const { return wasm_.size() + host_.size(); }
+
+  void Trace(cppgc::Visitor* visitor) const {
+    visitor->RegisterWeakCallback(&ProcessWeakness, this);
+    traced_weakly_.store(true);
+    if (running_.load() == 0) return;
+    if (visitor->DeferTraceToMutatorThreadIfConcurrent(this, &TraceStrongly,
+                                                       sizeof(*this))) {
+      return;
+    }
+    TraceStrongly(visitor, this);
+  }
+
+ private:
+  // Objects added while the Store runs are marked at once: the table may
+  // have been traced already in this GC.
+  static void MarkIfMarking(const void* object) {
+    cppgc::subtle::HeapConsistency::WriteBarrierParams params;
+    if (cppgc::subtle::HeapConsistency::GetWriteBarrierType(object, object,
+                                                            params) ==
+        cppgc::subtle::HeapConsistency::WriteBarrierType::kMarking) {
+      cppgc::subtle::HeapConsistency::DijkstraWriteBarrier(params, object);
+    }
+  }
+
+  static void TraceStrongly(cppgc::Visitor* visitor, const void* self) {
+    auto* table = static_cast<const WeakObjectTable*>(self);
+    table->traced_weakly_.store(false);
+    for (uint32_t bits : table->wasm_) {
+      WasmMember member(static_cast<WasmGcObject*>(
+          const_cast<void*>(DecompressMember(bits))));
+      visitor->Trace(member);
+    }
+    for (uint32_t bits : table->host_) {
+      HostMember member(
+          static_cast<RustObj*>(const_cast<void*>(DecompressMember(bits))));
+      visitor->Trace(member);
+    }
+  }
+
+  // Drops the dead entries, and duplicate host objects (one handed in
+  // twice; a wasm object is added once, when allocated).
+  static void ProcessWeakness(const cppgc::LivenessBroker& broker,
+                              const void* self) {
+    auto* table =
+        const_cast<WeakObjectTable*>(static_cast<const WeakObjectTable*>(self));
+    std::erase_if(table->wasm_, [&](uint32_t bits) {
+      return !broker.IsHeapObjectAlive(
+          static_cast<const WasmGcObject*>(DecompressMember(bits)));
+    });
+    std::erase_if(table->host_, [&](uint32_t bits) {
+      return !broker.IsHeapObjectAlive(
+          static_cast<const RustObj*>(DecompressMember(bits)));
+    });
+    auto& host = table->host_;
+    std::sort(host.begin(), host.end());
+    host.erase(std::unique(host.begin(), host.end()), host.end());
+    table->traced_weakly_.store(false);
+  }
+
+  std::vector<uint32_t> wasm_;
+  std::vector<uint32_t> host_;
+  std::atomic<uint32_t> running_{0};
+  mutable std::atomic<bool> traced_weakly_{false};
+};
+
+using TableMember = cppgc::Member<WeakObjectTable>;
+
+void cppgc__WasmGc__SetTypes(const WasmGcType* types) {
+  g_wasm_gc_types.store(types, std::memory_order_release);
+}
+
+size_t cppgc__WasmGcObject__FIELDS_OFFSET() {
+  return WasmGcObject::kFieldsOffset;
+}
+
+WasmGcObject* cppgc__WasmGcObject__New(cppgc::AllocationHandle* handle,
+                                       uint32_t type, uint32_t length,
+                                       size_t field_bytes) {
+  size_t extra = field_bytes > 8 ? field_bytes - 8 : 0;
+  return cppgc::MakeGarbageCollected<WasmGcObject>(
+      *handle, cppgc::AdditionalBytes(extra), type, length, field_bytes);
+}
+
+// The three kinds of `Member`, as fields of wasm objects (`Assign`, `Get`)
+// or of Rust GC objects (all of them). `Assign` is an atomic store plus
+// the write barrier; null clears.
+
+void cppgc__WasmMember__CONSTRUCT(void* slot) { new (slot) WasmMember(); }
+void cppgc__WasmMember__DESTRUCT(void* slot) {
+  static_cast<WasmMember*>(slot)->~WasmMember();
+}
+void cppgc__WasmMember__Assign(void* slot, WasmGcObject* object) {
+  *static_cast<WasmMember*>(slot) = object;
+}
+WasmGcObject* cppgc__WasmMember__Get(const void* slot) {
+  return static_cast<const WasmMember*>(slot)->Get();
+}
+void cppgc__Visitor__Trace__WasmMember(cppgc::Visitor* visitor,
+                                       const void* slot) {
+  visitor->Trace(*static_cast<const WasmMember*>(slot));
+}
+
+void cppgc__HostMember__Assign(void* slot, RustObj* object) {
+  *static_cast<HostMember*>(slot) = object;
+}
+RustObj* cppgc__HostMember__Get(const void* slot) {
+  return static_cast<const HostMember*>(slot)->Get();
+}
+
+void cppgc__TableMember__CONSTRUCT(void* slot) { new (slot) TableMember(); }
+void cppgc__TableMember__DESTRUCT(void* slot) {
+  static_cast<TableMember*>(slot)->~TableMember();
+}
+void cppgc__TableMember__Assign(void* slot, WeakObjectTable* table) {
+  *static_cast<TableMember*>(slot) = table;
+}
+void cppgc__Visitor__Trace__TableMember(cppgc::Visitor* visitor,
+                                        const void* slot) {
+  visitor->Trace(*static_cast<const TableMember*>(slot));
+}
+
+WeakObjectTable* cppgc__WeakObjectTable__New(cppgc::AllocationHandle* handle) {
+  return cppgc::MakeGarbageCollected<WeakObjectTable>(*handle);
+}
+void cppgc__WeakObjectTable__AddWasm(WeakObjectTable* table,
+                                     const WasmGcObject* object) {
+  table->AddWasm(object);
+}
+void cppgc__WeakObjectTable__AddHost(WeakObjectTable* table,
+                                     const RustObj* object) {
+  table->AddHost(object);
+}
+void cppgc__WeakObjectTable__Enter(WeakObjectTable* table) { table->Enter(); }
+void cppgc__WeakObjectTable__Exit(WeakObjectTable* table) { table->Exit(); }
+size_t cppgc__WeakObjectTable__Size(const WeakObjectTable* table) {
+  return table->size();
+}
+
+#endif  // defined(CPPGC_POINTER_COMPRESSION)
+
+// kun: cppgc's public testing API, for `cppgc::testing` in `src/cppgc/
+// testing.rs`. Only valid on a heap attached to no isolate.
+
+void cppgc__testing__start_gc(v8::CppHeap* heap) {
+  cppgc::testing::StandaloneTestingHeap(heap->GetHeapHandle())
+      .StartGarbageCollection();
+}
+
+// Returns true once marking has no more work. The caller holds no unrooted
+// GC pointers on the stack, so the step doesn't scan it.
+bool cppgc__testing__marking_step(v8::CppHeap* heap) {
+  return cppgc::testing::StandaloneTestingHeap(heap->GetHeapHandle())
+      .PerformMarkingStep(cppgc::EmbedderStackState::kNoHeapPointers);
+}
+
+void cppgc__testing__finalize_gc(v8::CppHeap* heap) {
+  cppgc::testing::StandaloneTestingHeap(heap->GetHeapHandle())
+      .FinalizeGarbageCollection(cppgc::EmbedderStackState::kNoHeapPointers);
+}
+
+void cppgc__testing__set_main_thread_marking(v8::CppHeap* heap,
+                                             bool enabled) {
+  cppgc::testing::StandaloneTestingHeap(heap->GetHeapHandle())
+      .ToggleMainThreadMarking(enabled);
+}
+
+bool cppgc__testing__is_marking(v8::CppHeap* heap) {
+  return cppgc::subtle::HeapState::IsMarking(heap->GetHeapHandle());
+}
+
+bool cppgc__testing__is_sweeping(v8::CppHeap* heap) {
+  return cppgc::subtle::HeapState::IsSweeping(heap->GetHeapHandle());
 }
 
 void cppgc__Visitor__Trace__Member(cppgc::Visitor* visitor,
@@ -5082,6 +5638,18 @@ void cppgc__Member__DESTRUCT(cppgc::Member<RustObj>* self) {
 
 RustObj* cppgc__Member__Get(cppgc::Member<RustObj>* member) {
   return member->Get();
+}
+
+// kun: the base compressed `Member`s are relative to (cppgc's
+// `CageBaseGlobal`, set when the first heap reserves its cage, the same
+// from then on), for Rust to decompress them without a call per read. 0
+// without cppgc's pointer compression.
+uintptr_t cppgc__CageBase() {
+#if defined(CPPGC_POINTER_COMPRESSION)
+  return cppgc::internal::CageBaseGlobal::Get();
+#else
+  return 0;
+#endif
 }
 
 void cppgc__Member__Assign(cppgc::Member<RustObj>* member, RustObj* other) {

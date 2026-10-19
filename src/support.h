@@ -201,8 +201,19 @@ struct const_memory_span_t {
 
 #endif  // SUPPORT_H_
 
+class RustObj;
+
+// Writes the Rust side of a new RustObj (its value and `dynamic` pointer).
+// kun: called from the constructor, so the Rust data is written before
+// cppgc marks the object fully constructed (a release store, after the
+// constructor returns). Concurrent markers trace an object only after
+// reading that bit with acquire, so they see the Rust data without any
+// further synchronization. It must not allocate on the cppgc heap.
+using RustObjInit = void (*)(RustObj* self, void* data);
+
 class RustObj : public v8::Object::Wrappable {
  public:
+  RustObj(RustObjInit init, void* data) { init(this, data); }
   ~RustObj();
   void Trace(cppgc::Visitor* visitor) const;
   const char* GetHumanReadableName() const final;

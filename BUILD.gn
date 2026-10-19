@@ -6,6 +6,7 @@ static_library("rusty_v8") {
   sources = [
     "src/binding.cc",
     "src/crdtp_binding.cc",
+    "src/kun_trace.cc",  # kun: a Perfetto session and the embedder's spans
   ]
   deps = [
     "//build/config:shared_library_deps",
@@ -15,6 +16,9 @@ static_library("rusty_v8") {
     "//v8/third_party/inspector_protocol:crdtp",
     "//src/deno_inspector:deno_inspector_protocol",
     "//third_party/simdutf:simdutf",
+
+    # kun: Perfetto's client library, for `src/kun_trace.cc`.
+    "//v8:v8_tracing",
   ]
   configs -= [
     "//build/config/compiler:default_init_stack_vars",
@@ -28,6 +32,9 @@ config("rusty_v8_config") {
     "//v8:external_config",
     "//v8:toolchain",
     "//v8:features",
+
+    # kun: Perfetto's generated headers, for `src/kun_trace.cc`.
+    "//v8:v8_tracing_config",
   ]
   cflags = []
   if (is_win) {
