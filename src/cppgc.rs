@@ -46,6 +46,8 @@ unsafe extern "C" {
   // kun: allocation on any heap's `AllocationHandle`.
   fn v8__CppHeap__GetAllocationHandle(heap: *mut Heap)
   -> *mut AllocationHandle;
+  fn v8__CppHeap__EnterNoGarbageCollectionScope(heap: *mut Heap);
+  fn v8__CppHeap__LeaveNoGarbageCollectionScope(heap: *mut Heap);
   fn cppgc__make_garbage_collectable_on(
     handle: *mut AllocationHandle,
     size: usize,
@@ -322,6 +324,36 @@ impl Heap {
   pub fn allocation_handle(&self) -> &AllocationHandle {
     // SAFETY: the handle lives as long as the heap.
     unsafe { &*v8__CppHeap__GetAllocationHandle(self as *const Heap as *mut _) }
+  }
+
+  // kun: cppgc's no-GC scope.
+  /// Enters the heap's no-GC scope (`cppgc::subtle::NoGarbageCollectionScope`):
+  /// until it is left, allocating on the heap completes no GC (it may still
+  /// advance marking and sweep what the last GC found dead). A GC that V8
+  /// starts on its own (allocating JS objects) doesn't check it.
+  ///
+  /// # Safety
+  ///
+  /// On the heap's thread; each call is paired with one call of
+  /// [`leave_no_gc_scope`](Self::leave_no_gc_scope), later.
+  pub unsafe fn enter_no_gc_scope(&self) {
+    // SAFETY: a live heap, on its thread, per the caller.
+    unsafe {
+      v8__CppHeap__EnterNoGarbageCollectionScope(self as *const Heap as *mut _)
+    }
+  }
+
+  /// Leaves the heap's no-GC scope.
+  ///
+  /// # Safety
+  ///
+  /// On the heap's thread, paired with an earlier
+  /// [`enter_no_gc_scope`](Self::enter_no_gc_scope).
+  pub unsafe fn leave_no_gc_scope(&self) {
+    // SAFETY: a live heap, on its thread, per the caller.
+    unsafe {
+      v8__CppHeap__LeaveNoGarbageCollectionScope(self as *const Heap as *mut _)
+    }
   }
 }
 

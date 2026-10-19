@@ -35,6 +35,7 @@
 #include "v8.h"
 #include "v8/src/flags/flags.h"
 #include "v8/src/heap/cppgc-internal/heap.h"  // kun: standalone heap marking
+#include "v8/src/heap/cppgc-js/cpp-heap.h"  // kun: no-GC scope's report
 #include "v8/src/libplatform/default-platform.h"
 
 using namespace support;
@@ -4788,6 +4789,66 @@ cppgc::AllocationHandle* v8__CppHeap__GetAllocationHandle(v8::CppHeap* heap) {
   return &heap->GetAllocationHandle();
 }
 
+// kun: cppgc's no-GC scope on a heap (`cppgc::subtle::
+// NoGarbageCollectionScope`), entered and left in pairs: while it is
+// entered, allocating on the heap completes no GC (cppgc's GC triggers, and
+// a `CppHeap` reporting its allocations to V8, check `IsGCAllowed()`).
+void v8__CppHeap__EnterNoGarbageCollectionScope(v8::CppHeap* heap) {
+  cppgc::subtle::NoGarbageCollectionScope::Enter(heap->GetHeapHandle());
+}
+
+// Leaving, the heap reports what it allocated meanwhile to V8, which it
+// skipped while in the scope (`ReportBufferedAllocationSizeIfPossible`
+// checks `IsGCAllowed()`), a check interval (128 KB) at a time, as it
+// would have: one report of it all would advance V8's incremental marking
+// by one step instead of one per interval, and marking would fall behind.
+// V8 may finish a GC as it is told: the scope is left by then. Private
+// members of `v8::internal::CppHeap`: names in an explicit instantiation
+// aren't access-checked ([temp.spec.general]), so instantiating these
+// with the members' addresses defines functions that return them.
+}  // extern "C"
+namespace {
+using CppHeapReport = void (v8::internal::CppHeap::*)();
+template <CppHeapReport Report>
+struct CppHeapReportAccess {
+  friend CppHeapReport cpp_heap_report() { return Report; }
+};
+template struct CppHeapReportAccess<
+    &v8::internal::CppHeap::ReportBufferedAllocationSizeIfPossible>;
+CppHeapReport cpp_heap_report();
+
+using CppHeapBuffered = int64_t v8::internal::CppHeap::*;
+template <CppHeapBuffered Buffered>
+struct CppHeapBufferedAccess {
+  friend CppHeapBuffered cpp_heap_buffered() { return Buffered; }
+};
+template struct CppHeapBufferedAccess<
+    &v8::internal::CppHeap::buffered_allocated_bytes_>;
+CppHeapBuffered cpp_heap_buffered();
+}  // namespace
+extern "C" {
+
+void v8__CppHeap__LeaveNoGarbageCollectionScope(v8::CppHeap* heap) {
+  cppgc::subtle::NoGarbageCollectionScope::Leave(heap->GetHeapHandle());
+  auto* internal = v8::internal::CppHeap::From(heap);
+  // Still in an outer scope (or detached), each report returns at once,
+  // leaving what it was given: the whole comes back for later.
+  constexpr int64_t kInterval = 128 * 1024;
+  int64_t& buffered = internal->*cpp_heap_buffered();
+  int64_t left = buffered;
+  buffered = 0;
+  while (left > 0) {
+    const int64_t chunk = left < kInterval ? left : kInterval;
+    buffered += chunk;
+    (internal->*cpp_heap_report())();
+    left -= chunk;
+  }
+  if (left < 0) {
+    buffered += left;
+    (internal->*cpp_heap_report())();
+  }
+}
+
 // kun: a standalone `cppgc::Heap` (not a `v8::CppHeap`), for `cppgc::
 // standalone` in `src/cppgc/standalone.rs`: cppgc with no isolate,
 // scheduling its own GCs.
@@ -4927,6 +4988,16 @@ void cppgc__StandaloneHeap__ForceGarbageCollectionSlow(
 
 bool cppgc__StandaloneHeap__IsMarking(cppgc::Heap* heap) {
   return cppgc::subtle::HeapState::IsMarking(heap->GetHeapHandle());
+}
+
+// kun: as `v8__CppHeap__EnterNoGarbageCollectionScope`, on a standalone
+// heap.
+void cppgc__StandaloneHeap__EnterNoGarbageCollectionScope(cppgc::Heap* heap) {
+  cppgc::subtle::NoGarbageCollectionScope::Enter(heap->GetHeapHandle());
+}
+
+void cppgc__StandaloneHeap__LeaveNoGarbageCollectionScope(cppgc::Heap* heap) {
+  cppgc::subtle::NoGarbageCollectionScope::Leave(heap->GetHeapHandle());
 }
 
 // One step of the incremental marking the heap started, then the GC's atomic

@@ -42,6 +42,8 @@ unsafe extern "C" {
     stack_state: EmbedderStackState,
   );
   fn cppgc__StandaloneHeap__IsMarking(heap: *mut RawHeap) -> bool;
+  fn cppgc__StandaloneHeap__EnterNoGarbageCollectionScope(heap: *mut RawHeap);
+  fn cppgc__StandaloneHeap__LeaveNoGarbageCollectionScope(heap: *mut RawHeap);
   fn cppgc__StandaloneHeap__MarkingStep(heap: *mut RawHeap);
 }
 
@@ -119,6 +121,30 @@ impl StandaloneHeap {
   pub fn is_marking(&self) -> bool {
     // SAFETY: the heap is alive.
     unsafe { cppgc__StandaloneHeap__IsMarking(self.heap.as_ptr()) }
+  }
+
+  /// As [`Heap::enter_no_gc_scope`](super::Heap::enter_no_gc_scope).
+  ///
+  /// # Safety
+  ///
+  /// As there.
+  pub unsafe fn enter_no_gc_scope(&self) {
+    // SAFETY: the heap is alive; pairing is the caller's.
+    unsafe {
+      cppgc__StandaloneHeap__EnterNoGarbageCollectionScope(self.heap.as_ptr())
+    }
+  }
+
+  /// As [`Heap::leave_no_gc_scope`](super::Heap::leave_no_gc_scope).
+  ///
+  /// # Safety
+  ///
+  /// As there.
+  pub unsafe fn leave_no_gc_scope(&self) {
+    // SAFETY: the heap is alive; pairing is the caller's.
+    unsafe {
+      cppgc__StandaloneHeap__LeaveNoGarbageCollectionScope(self.heap.as_ptr())
+    }
   }
 
   /// One step of the GC that is marking, and its final pause once marking
