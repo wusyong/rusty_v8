@@ -292,24 +292,6 @@ Code changes are marked with `kun:` comments.
   and making and dropping a `Persistent` (its node holds its address), stay
   calls.
 
-- **cppgc's no-GC scope** (`src/cppgc.rs`, `src/cppgc/standalone.rs`,
-  `src/binding.cc`; 2026-10-19): `Heap::enter_no_gc_scope` /
-  `leave_no_gc_scope` (a `v8::CppHeap`, attached or detached) and the
-  same on `StandaloneHeap` (a `cppgc::Heap`) enter and leave
-  `cppgc::subtle::NoGarbageCollectionScope`, in pairs: until it is left,
-  allocating on the heap completes no GC (cppgc's own triggers, a
-  `CppHeap` reporting its allocation to V8, and a failed allocation's
-  retry all check `IsGCAllowed()`). A GC V8 starts as it allocates its own
-  objects doesn't check it. kun's `dom` holds unrooted node pointers in
-  such a scope. A `CppHeap` doesn't report its allocation to V8 while in
-  it; leaving, `v8__CppHeap__LeaveNoGarbageCollectionScope` reports what
-  was allocated meanwhile 128 KB (V8's check interval) at a time, through
-  `CppHeap`'s private `buffered_allocated_bytes_` and
-  `ReportBufferedAllocationSizeIfPossible`: reported at once, V8's
-  incremental marking advanced one step instead of one per interval, fell
-  behind, and kun's pages lost locality (TodoMVC-jQuery's style recalc
-  took 60% more cycles). kun's `bindings` build script checks the code.
-
 - **`UnsafePtr::from_value`** (`src/cppgc.rs`; 2026-10-17): the object a
   `&T` read from the heap is the value of, computed back from its address
   (`RustObjConcrete` is `#[repr(C)]`; the inverse of `as_ref`), so kun can
