@@ -94,6 +94,11 @@ unsafe extern "C" {
   );
   fn v8__FunctionTemplate__ReadOnlyPrototype(this: *const FunctionTemplate);
   fn v8__FunctionTemplate__RemovePrototype(this: *const FunctionTemplate);
+  // kun: `FunctionTemplate::SetAcceptAnyReceiver`.
+  fn v8__FunctionTemplate__SetAcceptAnyReceiver(
+    this: *const FunctionTemplate,
+    value: bool,
+  );
 
   fn v8__ObjectTemplate__New(
     isolate: *mut RealIsolate,
@@ -865,6 +870,18 @@ impl FunctionTemplate {
   #[inline(always)]
   pub fn remove_prototype(&self) {
     unsafe { v8__FunctionTemplate__RemovePrototype(self) };
+  }
+
+  // kun: so an embedder's functions can't be called on an object of a
+  // context its own can't access (Blink's `IDLMemberInstaller` sets it for
+  // every member that isn't [CrossOrigin]).
+  /// Whether a call of the function skips V8's access check of its
+  /// receiver (the default: true). With false, calling it on a global
+  /// proxy whose context the calling one may not access (its security
+  /// token differs) throws, as reading a property of it does.
+  #[inline(always)]
+  pub fn set_accept_any_receiver(&self, value: bool) {
+    unsafe { v8__FunctionTemplate__SetAcceptAnyReceiver(self, value) };
   }
 
   /// Sets an [accessor property](https://tc39.es/ecma262/#sec-property-attributes)

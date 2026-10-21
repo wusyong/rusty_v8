@@ -2578,6 +2578,13 @@ void v8__FunctionTemplate__RemovePrototype(const v8::FunctionTemplate& self) {
   ptr_to_local(&self)->RemovePrototype();
 }
 
+// kun: whether V8 checks that the receiver may be accessed (Blink sets it
+// for every member that isn't [CrossOrigin]).
+void v8__FunctionTemplate__SetAcceptAnyReceiver(
+    const v8::FunctionTemplate& self, bool value) {
+  ptr_to_local(&self)->SetAcceptAnyReceiver(value);
+}
+
 const v8::ObjectTemplate* v8__FunctionTemplate__PrototypeTemplate(
     const v8::FunctionTemplate& self) {
   return local_to_ptr(ptr_to_local(&self)->PrototypeTemplate());

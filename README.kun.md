@@ -297,6 +297,14 @@ Code changes are marked with `kun:` comments.
   (`RustObjConcrete` is `#[repr(C)]`; the inverse of `as_ref`), so kun can
   root a node it reached through an edge without looking it up in a table.
 
+- **`FunctionTemplate::set_accept_any_receiver`** (`src/template.rs`,
+  `src/binding.cc`; 2026-10-21): V8's `SetAcceptAnyReceiver`, unbound
+  upstream. kun's member functions set it to false, as Blink's
+  `IDLMemberInstaller` does for every member that isn't `[CrossOrigin]`:
+  V8 then checks that a call's receiver may be accessed, so a realm's own
+  function called on another origin's window throws instead of running
+  (V8's default skips the check).
+
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
 - **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks
