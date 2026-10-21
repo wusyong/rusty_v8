@@ -122,6 +122,8 @@ pub use isolate::HostImportModuleWithPhaseDynamicallyCallback;
 pub use isolate::HostInitializeImportMetaObjectCallback;
 pub use isolate::IntoSharedError;
 pub use isolate::IntoSharedErrorKind;
+// kun: the callback type of `Isolate::set_is_js_api_wrapper_native_error_callback`.
+pub use isolate::IsJsApiWrapperNativeErrorCallback;
 pub use isolate::Isolate;
 pub use isolate::IsolateHandle;
 pub use isolate::MemoryPressureLevel;

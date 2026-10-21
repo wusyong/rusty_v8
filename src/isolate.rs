@@ -563,6 +563,15 @@ pub type GcCallbackWithData = unsafe extern "C" fn(
 pub type InterruptCallback =
   unsafe extern "C" fn(isolate: UnsafeRawIsolatePtr, data: *mut c_void);
 
+// kun: V8's `IsJSApiWrapperNativeErrorCallback`, unbound upstream.
+/// Whether `object`, an API wrapper, is a native error, as one with
+/// [[ErrorData]] is: what `Error.isError` gives for it. Blink answers true
+/// for a `DOMException`'s wrapper.
+pub type IsJsApiWrapperNativeErrorCallback = unsafe extern "C" fn(
+  isolate: UnsafeRawIsolatePtr,
+  object: Local<Object>,
+) -> bool;
+
 pub type NearHeapLimitCallback = unsafe extern "C" fn(
   data: *mut c_void,
   current_heap_limit: usize,
@@ -784,6 +793,11 @@ unsafe extern "C" {
   fn v8__Isolate__SetAllowWasmCodeGenerationCallback(
     isolate: *mut RealIsolate,
     callback: AllowWasmCodeGenerationCallback,
+  );
+  // kun: unbound upstream.
+  fn v8__Isolate__SetIsJSApiWrapperNativeErrorCallback(
+    isolate: *mut RealIsolate,
+    callback: IsJsApiWrapperNativeErrorCallback,
   );
   fn v8__Isolate__SetHostInitializeImportMetaObjectCallback(
     isolate: *mut RealIsolate,
@@ -1653,6 +1667,22 @@ impl Isolate {
   ) {
     unsafe {
       v8__Isolate__SetAllowWasmCodeGenerationCallback(
+        self.as_real_ptr(),
+        callback,
+      );
+    }
+  }
+
+  // kun: unbound upstream.
+  /// Sets the callback that says whether an API wrapper is a native error
+  /// (`Error.isError`).
+  #[inline(always)]
+  pub fn set_is_js_api_wrapper_native_error_callback(
+    &mut self,
+    callback: IsJsApiWrapperNativeErrorCallback,
+  ) {
+    unsafe {
+      v8__Isolate__SetIsJSApiWrapperNativeErrorCallback(
         self.as_real_ptr(),
         callback,
       );

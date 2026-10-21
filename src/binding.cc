@@ -313,6 +313,13 @@ void v8__Isolate__SetWasmAsyncResolvePromiseCallback(
   isolate->SetWasmAsyncResolvePromiseCallback(callback);
 }
 
+// kun: whether an API wrapper is a native error (`Error.isError`); Blink
+// answers true for a DOMException's wrapper.
+void v8__Isolate__SetIsJSApiWrapperNativeErrorCallback(
+    v8::Isolate* isolate, v8::IsJSApiWrapperNativeErrorCallback callback) {
+  isolate->SetIsJSApiWrapperNativeErrorCallback(callback);
+}
+
 void v8__Isolate__SetCaptureStackTraceForUncaughtExceptions(
     v8::Isolate* isolate, bool capture, int frame_limit) {
   isolate->SetCaptureStackTraceForUncaughtExceptions(capture, frame_limit);

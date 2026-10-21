@@ -318,6 +318,11 @@ Code changes are marked with `kun:` comments.
   objects with it on the global's template, as Blink's
   `IDLMemberInstaller::InstallExposedConstructs` does on Window's instance
   template: a realm makes none of them until script reads one.
+- **`Isolate::set_is_js_api_wrapper_native_error_callback`**
+  (`src/isolate.rs`, `src/binding.cc`; 2026-10-22): V8's
+  `SetIsJSApiWrapperNativeErrorCallback`, unbound upstream. V8 asks it
+  whether an API wrapper is a native error (`Error.isError`); kun answers
+  true for a `DOMException`'s wrapper, as Blink's `V8Initializer` does.
 
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
