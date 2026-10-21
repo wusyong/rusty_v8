@@ -4132,6 +4132,54 @@ void v8__CpuProfiler__UseDetailedSourcePositionsForProfiling(
   v8::CpuProfiler::UseDetailedSourcePositionsForProfiling(isolate);
 }
 
+// kun: a CpuProfiler started and stopped by the embedder (DevTools'
+// Profiler domain), its profile serialized as DevTools' JSON.
+v8::CpuProfiler* v8__CpuProfiler__New(v8::Isolate* isolate) {
+  return v8::CpuProfiler::New(isolate);
+}
+
+void v8__CpuProfiler__Dispose(v8::CpuProfiler* self) { self->Dispose(); }
+
+void v8__CpuProfiler__SetSamplingInterval(v8::CpuProfiler* self, int us) {
+  self->SetSamplingInterval(us);
+}
+
+bool v8__CpuProfiler__StartProfiling(v8::CpuProfiler* self,
+                                     v8::Isolate* isolate) {
+  v8::HandleScope scope(isolate);
+  return self->StartProfiling(v8::String::NewFromUtf8Literal(isolate, "kun"),
+                              /*record_samples=*/true) ==
+         v8::CpuProfilingStatus::kStarted;
+}
+
+bool v8__CpuProfiler__StopProfiling(v8::CpuProfiler* self,
+                                    v8::Isolate* isolate,
+                                    HeapSnapshotCallback callback, void* arg) {
+  struct OutputStream : public v8::OutputStream {
+    OutputStream(HeapSnapshotCallback callback, void* arg)
+        : callback_(callback), arg_(arg) {}
+    void EndOfStream() override {}
+    v8::OutputStream::WriteResult WriteAsciiChunk(char* data,
+                                                  int size) override {
+      assert(size >= 0);
+      if (callback_(arg_, data, static_cast<size_t>(size)))
+        return v8::OutputStream::kContinue;
+      return v8::OutputStream::kAbort;
+    }
+    HeapSnapshotCallback const callback_;
+    void* const arg_;
+  };
+
+  v8::HandleScope scope(isolate);
+  v8::CpuProfile* profile =
+      self->StopProfiling(v8::String::NewFromUtf8Literal(isolate, "kun"));
+  if (profile == nullptr) return false;
+  OutputStream stream(callback, arg);
+  profile->Serialize(&stream);
+  profile->Delete();
+  return true;
+}
+
 }  // extern "C"
 
 // v8::ValueSerializer::Delegate

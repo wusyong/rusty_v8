@@ -305,6 +305,14 @@ Code changes are marked with `kun:` comments.
   function called on another origin's window throws instead of running
   (V8's default skips the check).
 
+- **`CpuProfiler`** (`src/cpu_profiler.rs`, `src/binding.cc`; 2026-10-21):
+  V8's `CpuProfiler` started and stopped by the embedder (kun's automation
+  pipe has DevTools' `Profiler` domain), its profile serialized by V8 as
+  DevTools' JSON (`CpuProfile::Serialize`) rather than read node by node.
+  A profile still running is stopped before the profiler is disposed:
+  `Dispose` alone leaves its sampling thread running. Only what kun needs;
+  upstream has no binding for it.
+
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
 - **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks

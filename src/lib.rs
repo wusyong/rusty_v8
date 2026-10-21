@@ -48,6 +48,8 @@ mod gc;
 mod get_property_names_args_builder;
 mod handle;
 pub mod icu;
+// kun: V8's CpuProfiler, started and stopped by the embedder.
+mod cpu_profiler;
 mod isolate;
 mod isolate_create_params;
 mod locker;
@@ -109,6 +111,7 @@ pub use handle::Local;
 pub use handle::SealedLocal;
 pub use handle::TracedReference;
 pub use handle::Weak;
+pub use cpu_profiler::CpuProfiler;
 pub use isolate::GarbageCollectionType;
 pub use isolate::HeapCodeStatistics;
 pub use isolate::HeapSpaceStatistics;
