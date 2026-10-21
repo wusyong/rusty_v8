@@ -51,6 +51,17 @@ unsafe extern "C" {
     intrinsic: Intrinsic,
     attr: PropertyAttribute,
   );
+  // kun: `Template::SetLazyDataProperty`.
+  #[allow(clippy::too_many_arguments)]
+  fn v8__Template__SetLazyDataProperty(
+    this: *const Template,
+    key: *const Name,
+    getter: AccessorNameGetterCallback,
+    data_or_null: *const Value,
+    attr: PropertyAttribute,
+    getter_side_effect_type: SideEffectType,
+    setter_side_effect_type: SideEffectType,
+  );
 
   fn v8__Signature__New(
     isolate: *mut RealIsolate,
@@ -666,6 +677,35 @@ impl Template {
   ) {
     unsafe {
       v8__Template__SetIntrinsicDataProperty(self, &*key, intrinsic, attr);
+    }
+  }
+
+  // kun: so that a global's many properties (an embedder's interface
+  // objects) cost nothing until read, as Blink installs them.
+  /// Like [`Object::set_lazy_data_property_with_data`], on every instance of
+  /// the template: each instance has a native data property that V8
+  /// replaces with an ordinary data property, the getter's value, the first
+  /// time it is read. `data` is what the getter's `args.data()` gives.
+  #[inline(always)]
+  pub fn set_lazy_data_property(
+    &self,
+    key: Local<Name>,
+    getter: impl MapFnTo<AccessorNameGetterCallback>,
+    data: Option<Local<Value>>,
+    attr: PropertyAttribute,
+    getter_side_effect_type: SideEffectType,
+    setter_side_effect_type: SideEffectType,
+  ) {
+    unsafe {
+      v8__Template__SetLazyDataProperty(
+        self,
+        &*key,
+        getter.map_fn_to(),
+        data.map_or(null(), |data| &*data),
+        attr,
+        getter_side_effect_type,
+        setter_side_effect_type,
+      );
     }
   }
 }

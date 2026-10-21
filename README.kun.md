@@ -312,6 +312,12 @@ Code changes are marked with `kun:` comments.
   A profile still running is stopped before the profiler is disposed:
   `Dispose` alone leaves its sampling thread running. Only what kun needs;
   upstream has no binding for it.
+- **`Template::set_lazy_data_property`** (`src/template.rs`,
+  `src/binding.cc`; 2026-10-21): V8's `Template::SetLazyDataProperty`,
+  unbound upstream (only `Object`'s is). kun installs a global's interface
+  objects with it on the global's template, as Blink's
+  `IDLMemberInstaller::InstallExposedConstructs` does on Window's instance
+  template: a realm makes none of them until script reads one.
 
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").

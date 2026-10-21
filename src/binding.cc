@@ -1492,6 +1492,19 @@ void v8__Template__Set(const v8::Template& self, const v8::Name& key,
   ptr_to_local(&self)->Set(ptr_to_local(&key), ptr_to_local(&value), attr);
 }
 
+// kun: a property each instance of the template has, made with its getter
+// the first time it is read (Blink installs a global's interface objects
+// so).
+void v8__Template__SetLazyDataProperty(
+    const v8::Template& self, const v8::Name& key,
+    v8::AccessorNameGetterCallback getter, const v8::Value* data_or_null,
+    v8::PropertyAttribute attr, v8::SideEffectType getter_side_effect_type,
+    v8::SideEffectType setter_side_effect_type) {
+  ptr_to_local(&self)->SetLazyDataProperty(
+      ptr_to_local(&key), getter, ptr_to_local(data_or_null), attr,
+      getter_side_effect_type, setter_side_effect_type);
+}
+
 void v8__Template__SetIntrinsicDataProperty(const v8::Template& self,
                                             const v8::Name& key,
                                             v8::Intrinsic intrinsic,
