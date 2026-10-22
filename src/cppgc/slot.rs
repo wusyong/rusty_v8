@@ -503,9 +503,8 @@ impl<T> Drop for TracedSlot<T> {
 /// by default on desktop builds, release ones too: 32 bytes on x64). Read
 /// from the build for that reason.
 const WEAK_PERSISTENT_SIZE: usize = crate::binding::cppgc__WeakPersistent_SIZE;
-const _: () = assert!(
-  crate::binding::cppgc__WeakPersistent_ALIGN == align_of::<usize>()
-);
+const _: () =
+  assert!(crate::binding::cppgc__WeakPersistent_ALIGN == align_of::<usize>());
 
 /// A `WeakPersistent`'s bytes, aligned like it (pointers).
 #[repr(C)]
@@ -543,7 +542,9 @@ impl<T: GarbageCollected> WeakPersistentSlot<T> {
     let mut storage = MaybeUninit::<WeakPersistentStorage>::uninit();
     // SAFETY: constructs the C++ object in place, empty: it has no node, so
     // nothing records its address and moving it afterwards is fine.
-    unsafe { cppgc__WeakPersistent__CONSTRUCT_IN_PLACE(storage.as_mut_ptr().cast()) };
+    unsafe {
+      cppgc__WeakPersistent__CONSTRUCT_IN_PLACE(storage.as_mut_ptr().cast())
+    };
     Self {
       storage: UnsafeCell::new(storage),
       _phantom: PhantomData,
