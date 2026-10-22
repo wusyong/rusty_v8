@@ -78,8 +78,15 @@ counting the releases of the fork on that version. To release:
 
 1. Commit to `kun` and push it.
 2. `git tag kun-v152.2.0-<n+1> && git push origin kun-v152.2.0-<n+1>`.
-3. Wait for the workflow (a few hours; Windows is the slowest), then move
-   kun's `RUSTY_V8_MIRROR_TAG` to the new tag.
+3. Wait for the workflow (a few hours for a new V8; Windows is the
+   slowest), then move kun's `RUSTY_V8_MIRROR_TAG` to the new tag.
+
+The workflow compiles V8 through sccache and keeps the cache between runs
+(`actions/cache`, one per target and profile, keyed by the submodules and
+the glue): a release that doesn't move the `v8` submodule recompiles
+little besides the glue, while a new V8 compiles nearly everything again.
+GitHub keeps 10 GB of caches per repository and drops the least recently
+used beyond that.
 
 Running the workflow by hand (`workflow_dispatch`) builds without
 releasing; the files are kept as the run's artifacts.

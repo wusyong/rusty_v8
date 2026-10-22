@@ -54,6 +54,15 @@ jobs:
       V8_FROM_SOURCE: 1
       # build.rs's prebuilt_features_suffix() for v8_enable_pointer_compression.
       FEATURES_SUFFIX: _ptrcomp
+      # V8 compiles through sccache (build.rs makes it gn's cc_wrapper when
+      # it is on the PATH), and its cache is kept between runs: a release
+      # that doesn't move the `v8` submodule recompiles little besides the
+      # glue. The cap is well over one build (macOS's release is about 70 MB
+      # compressed), keeps the five variants within GitHub's 10 GB, and
+      # drops the oldest objects first.
+      SCCACHE_DIR: ${{ github.workspace }}/.sccache
+      SCCACHE_CACHE_SIZE: 1G
+      SCCACHE_IDLE_TIMEOUT: 0
 
     steps:
       - name: Configure git
@@ -103,12 +112,50 @@ jobs:
           brew install llvm@21
           echo "LIBCLANG_PATH=$(brew --prefix llvm@21)/lib" >> $GITHUB_ENV
 
+      # Keyed by what goes into V8's build; a run without an exact match
+      # starts from its variant's newest cache, and saves its own.
+      - name: Record the submodules
+        shell: bash
+        run: git submodule status --recursive > git_submodule_status.txt
+
+      - name: Restore the sccache cache
+        uses: actions/cache@v4
+        with:
+          path: .sccache
+          key: sccache-${{ matrix.target }}-${{ matrix.variant }}-${{ hashFiles('git_submodule_status.txt', 'build.rs', '.gn', 'BUILD.gn', 'src/**/*.cc', 'src/**/*.h') }}
+          restore-keys: sccache-${{ matrix.target }}-${{ matrix.variant }}-
+
+      # After the restore: the server reads the cache directory when it
+      # starts.
+      - name: Install and start sccache
+        shell: pwsh
+        run: |
+          $version = "v0.18.0"
+          $platform, $sha256 = @{
+            "x86_64-pc-windows-msvc"   = "x86_64-pc-windows-msvc",    "1a63c1be2beab3f04d27e4cc145443e092e02d3dd83a51030989829d7023091b"
+            "aarch64-apple-darwin"     = "aarch64-apple-darwin",      "308184519b646f5125289e8515b36f6ca65a13a041923994aebe702348674e8e"
+            "x86_64-unknown-linux-gnu" = "x86_64-unknown-linux-musl", "45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89"
+          }['${{ matrix.target }}']
+          $basename = "sccache-$version-$platform"
+          cd $env:RUNNER_TEMP
+          curl -fsSLO "https://github.com/mozilla/sccache/releases/download/$version/$basename.tar.gz"
+          if ((Get-FileHash "$basename.tar.gz" -Algorithm SHA256).Hash -ne $sha256) { throw "$basename.tar.gz: checksum mismatch" }
+          tar -xzf "$basename.tar.gz"
+          $dir = Join-Path (Get-Location) $basename
+          & (Join-Path $dir sccache) --start-server
+          $dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: Build
         shell: bash
         run: >-
           cargo build -v --locked --target ${{ matrix.target }}
           ${{ matrix.variant == 'release' && '--release' || '' }}
           --features v8_enable_pointer_compression
+
+      # Prints the hit rate, and lets go of the cache's files before
+      # actions/cache saves them.
+      - name: Stop sccache
+        run: sccache --stop-server
 
       - name: Package
         shell: bash
