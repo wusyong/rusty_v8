@@ -15,15 +15,16 @@ use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
-// kun: GC pointer slots sound under concurrent marking, test-only GC
-// control, a heap with no isolate, and wasm GC objects; see each module.
+// kun: GC pointer slots sound under concurrent marking, a weak persistent
+// built in place, test-only GC control, a heap with no isolate, and wasm GC
+// objects; see each module.
 mod slot;
 pub mod standalone;
 pub mod testing;
 // Needs cppgc's 32-bit `Member`s, which pointer compression brings.
 #[cfg(feature = "v8_enable_pointer_compression")]
 pub mod wasm_gc;
-pub use slot::{MemberSlot, TracedSlot, WeakMemberSlot};
+pub use slot::{MemberSlot, TracedSlot, WeakMemberSlot, WeakPersistentSlot};
 
 unsafe extern "C" {
   fn cppgc__initialize_process(platform: *mut Platform);
@@ -107,6 +108,9 @@ unsafe extern "C" {
   fn cppgc__WeakPersistent__Get(
     this: *const WeakPersistentInner,
   ) -> *mut RustObj;
+  // kun: one built in place (`WeakPersistentSlot`), not on the C++ heap.
+  fn cppgc__WeakPersistent__CONSTRUCT_IN_PLACE(this: *mut WeakPersistentInner);
+  fn cppgc__WeakPersistent__DESTRUCT_IN_PLACE(this: *mut WeakPersistentInner);
 }
 
 #[unsafe(no_mangle)]

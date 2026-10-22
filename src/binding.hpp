@@ -1,3 +1,4 @@
+#include <cppgc/persistent.h>
 #include <v8-cppgc.h>
 #include <v8-fast-api-calls.h>
 #include <v8-message.h>
@@ -15,6 +16,15 @@ static size_t v8__ScriptOrigin_SIZE = sizeof(v8::ScriptOrigin);
 
 static size_t cppgc__Member_SIZE = sizeof(cppgc::Member<RustObj>);
 static size_t cppgc__WeakMember_SIZE = sizeof(cppgc::WeakMember<RustObj>);
+
+// kun: a `WeakPersistent` built in Rust's memory (`WeakPersistentSlot`). With
+// cppgc's object names (`cppgc_enable_object_names`, on by default on desktop
+// builds, release ones too) it keeps a `SourceLocation`
+// (`KeepLocationPolicy`), so its size depends on the build.
+static size_t cppgc__WeakPersistent_SIZE =
+    sizeof(cppgc::WeakPersistent<RustObj>);
+static size_t cppgc__WeakPersistent_ALIGN =
+    alignof(cppgc::WeakPersistent<RustObj>);
 
 // kun: how far a compressed `Member` is shifted (0 without cppgc's pointer
 // compression), for Rust to decompress one itself, as `Member::Get` does

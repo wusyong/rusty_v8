@@ -29,21 +29,32 @@
 // writes the Rust data in `RustObj`'s constructor (see `RustObjInit` in
 // `support.h`), before cppgc's "fully constructed" release store, and a
 // marker traces an object only after reading that bit with acquire.
+//
+// `WeakPersistentSlot`, at the end, is here for another reason: not
+// concurrent marking (persistents are roots, which only the heap's thread
+// reads, in the GC's pause) but where it lives. Upstream's `WeakPersistent`
+// is one C++ `new` each; this one is built in memory the caller owns, and
+// pinned there once set.
 
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
-use std::marker::PhantomData;
+use std::marker::{PhantomData, PhantomPinned};
 use std::mem::{MaybeUninit, align_of, size_of};
+use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
 use super::{
   GarbageCollected, GetRustObj, MemberInner, RustObj, UnsafePtr, Visitor,
-  WeakMemberInner, cppgc__Member__Assign, cppgc__Member__CONSTRUCT,
-  cppgc__Member__DESTRUCT, cppgc__Member__Get, cppgc__Visitor__Trace__Member,
-  cppgc__Visitor__Trace__TracedReference, cppgc__Visitor__Trace__WeakMember,
-  cppgc__WeakMember__Assign, cppgc__WeakMember__CONSTRUCT,
-  cppgc__WeakMember__DESTRUCT, cppgc__WeakMember__Get,
+  WeakMemberInner, WeakPersistentInner, cppgc__Member__Assign,
+  cppgc__Member__CONSTRUCT, cppgc__Member__DESTRUCT, cppgc__Member__Get,
+  cppgc__Visitor__Trace__Member, cppgc__Visitor__Trace__TracedReference,
+  cppgc__Visitor__Trace__WeakMember, cppgc__WeakMember__Assign,
+  cppgc__WeakMember__CONSTRUCT, cppgc__WeakMember__DESTRUCT,
+  cppgc__WeakMember__Get, cppgc__WeakPersistent__Assign,
+  cppgc__WeakPersistent__CONSTRUCT_IN_PLACE,
+  cppgc__WeakPersistent__DESTRUCT_IN_PLACE, cppgc__WeakPersistent__Get,
+  get_value_from_rust_obj,
 };
 use crate::isolate::RealIsolate;
 use crate::scope::GetIsolate;
@@ -482,5 +493,134 @@ impl<T> Drop for TracedSlot<T> {
     // from a finalizer is allowed: during sweeping V8 leaves the node for the
     // next cycle (`TracedHandles::Destroy`).
     unsafe { v8__TracedReference__DESTRUCT(self.raw()) }
+  }
+}
+
+// --- WeakPersistentSlot ------------------------------------------------------
+
+/// `sizeof(cppgc::WeakPersistent<RustObj>)`: `raw_` and `node_`, plus a
+/// `SourceLocation` when cppgc keeps object names (`KeepLocationPolicy`; on
+/// by default on desktop builds, release ones too: 32 bytes on x64). Read
+/// from the build for that reason.
+const WEAK_PERSISTENT_SIZE: usize = crate::binding::cppgc__WeakPersistent_SIZE;
+const _: () = assert!(
+  crate::binding::cppgc__WeakPersistent_ALIGN == align_of::<usize>()
+);
+
+/// A `WeakPersistent`'s bytes, aligned like it (pointers).
+#[repr(C)]
+struct WeakPersistentStorage {
+  _align: [usize; 0],
+  _bytes: [u8; WEAK_PERSISTENT_SIZE],
+}
+
+/// A weak pointer from memory off the GC heap to a GC object
+/// (`cppgc::WeakPersistent`), built where the caller puts it instead of on
+/// the C++ heap: a root the GC clears when its target dies.
+///
+/// **Not movable once set.** Setting an empty slot takes a node from the
+/// heap's persistent region, and the node records the slot's address: the
+/// GC reads the slot there and clears it there. So `set` and `clear` take
+/// `Pin<&Self>`: a pinned slot stays where it is until it is dropped, which
+/// gives the node back first. An empty slot has no node (cppgc takes one
+/// only for a valid pointer and gives it back when cleared), so `empty`
+/// makes one by value, to be moved into place and pinned there.
+///
+/// Neither `Send` nor `Sync`: only on the thread of the heap its targets
+/// are on, as any persistent. No marker thread reads it (persistents are
+/// roots, which the heap's thread reads in the GC's pause), so its reads and
+/// writes need no atomics; the bytes are in an `UnsafeCell` because the GC
+/// clears them while the slot is shared.
+pub struct WeakPersistentSlot<T: GarbageCollected> {
+  storage: UnsafeCell<MaybeUninit<WeakPersistentStorage>>,
+  _phantom: PhantomData<*const T>,
+  _pinned: PhantomPinned,
+}
+
+impl<T: GarbageCollected> WeakPersistentSlot<T> {
+  /// An empty slot.
+  pub fn empty() -> Self {
+    let mut storage = MaybeUninit::<WeakPersistentStorage>::uninit();
+    // SAFETY: constructs the C++ object in place, empty: it has no node, so
+    // nothing records its address and moving it afterwards is fine.
+    unsafe { cppgc__WeakPersistent__CONSTRUCT_IN_PLACE(storage.as_mut_ptr().cast()) };
+    Self {
+      storage: UnsafeCell::new(storage),
+      _phantom: PhantomData,
+      _pinned: PhantomPinned,
+    }
+  }
+
+  fn raw(&self) -> *mut WeakPersistentInner {
+    self.storage.get().cast()
+  }
+
+  /// Points the slot at `target`, or empties it if `target` is null
+  /// (`operator=`). A slot that was empty takes a node, which records this
+  /// address, hence the pin.
+  pub fn set(self: Pin<&Self>, target: &impl GetRustObj<T>) {
+    // SAFETY: a live slot, pinned: it stays at this address until dropped.
+    unsafe { cppgc__WeakPersistent__Assign(self.raw(), target.get_rust_obj()) }
+  }
+
+  /// Empties the slot, giving its node back.
+  pub fn clear(self: Pin<&Self>) {
+    // SAFETY: a live slot, pinned.
+    unsafe { cppgc__WeakPersistent__Assign(self.raw(), std::ptr::null_mut()) }
+  }
+
+  /// The target, or `None` if the slot is empty or the target was
+  /// collected.
+  ///
+  /// # Safety
+  ///
+  /// The target must stay alive while the reference is used: no GC runs in
+  /// between, or it is otherwise kept alive.
+  pub unsafe fn get(&self) -> Option<&T> {
+    let target = self.get_rust_obj();
+    if target.is_null() {
+      return None;
+    }
+    // SAFETY: the slot only ever points to `T`s, alive per the caller.
+    Some(unsafe { &*get_value_from_rust_obj(target) })
+  }
+
+  /// The slot at `index` of pinned `slots`, pinned too: an element of a
+  /// pinned slice never moves while the slice is pinned.
+  pub fn index(slots: Pin<&[Self]>, index: usize) -> Pin<&Self> {
+    // SAFETY: structural pinning of the elements; nothing gives out a
+    // `&mut` to one.
+    unsafe { slots.map_unchecked(|slots| &slots[index]) }
+  }
+}
+
+impl<T: GarbageCollected> GetRustObj<T> for WeakPersistentSlot<T> {
+  fn get_rust_obj(&self) -> *mut RustObj {
+    // `PersistentBase`'s first field, the raw pointer (null once the GC
+    // cleared it, in a pause on this thread), read here as `Persistent`'s
+    // is. A debug build checks it against C++'s own.
+    // SAFETY: a live slot; the read can't race (this thread only).
+    let target = unsafe { self.storage.get().cast::<*mut RustObj>().read() };
+    if cfg!(debug_assertions) {
+      // SAFETY: a live slot.
+      let cpp = unsafe { cppgc__WeakPersistent__Get(self.raw()) };
+      assert_eq!(target, cpp, "WeakPersistent::Get differs");
+    }
+    target
+  }
+}
+
+impl<T: GarbageCollected> Drop for WeakPersistentSlot<T> {
+  fn drop(&mut self) {
+    // SAFETY: a live slot, destroyed once, where it was set: a pinned value
+    // is dropped in place, and an unpinned one was never set (so has no
+    // node). Gives the node back if the slot holds one.
+    unsafe { cppgc__WeakPersistent__DESTRUCT_IN_PLACE(self.raw()) }
+  }
+}
+
+impl<T: GarbageCollected> std::fmt::Debug for WeakPersistentSlot<T> {
+  fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fmt.debug_struct("WeakPersistentSlot").finish()
   }
 }

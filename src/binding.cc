@@ -5458,6 +5458,21 @@ RustObj* cppgc__WeakPersistent__Get(cppgc::WeakPersistent<RustObj>* self) {
   return self->Get();
 }
 
+// kun: a `WeakPersistent` in memory the caller owns (`WeakPersistentSlot`)
+// instead of one `new` each. Built empty: an empty one has no node in the
+// persistent region, so nothing records its address and it may still be
+// moved; once set, its node does, and Rust keeps it in place (`Pin`) until
+// it is destroyed here.
+void cppgc__WeakPersistent__CONSTRUCT_IN_PLACE(
+    uninit_t<cppgc::WeakPersistent<RustObj>>* buf) {
+  construct_in_place<cppgc::WeakPersistent<RustObj>>(buf);
+}
+
+void cppgc__WeakPersistent__DESTRUCT_IN_PLACE(
+    cppgc::WeakPersistent<RustObj>* self) {
+  self->~BasicPersistent();
+}
+
 }  // extern "C"
 
 // =============================================================================

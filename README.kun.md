@@ -330,6 +330,19 @@ Code changes are marked with `kun:` comments.
   `SetIsJSApiWrapperNativeErrorCallback`, unbound upstream. V8 asks it
   whether an API wrapper is a native error (`Error.isError`); kun answers
   true for a `DOMException`'s wrapper, as Blink's `V8Initializer` does.
+- **`WeakPersistentSlot`** (`src/cppgc/slot.rs`, `src/cppgc.rs`,
+  `src/binding.cc`, `src/binding.hpp`; 2026-10-22): a `WeakPersistent`
+  built in memory the caller owns (`cppgc__WeakPersistent__CONSTRUCT_IN_PLACE`,
+  `DESTRUCT_IN_PLACE`) instead of one C++ `new` each, which upstream's
+  `WeakPersistent` is because the persistent region's node records the
+  persistent's address and a Rust move doesn't tell C++. An empty one has
+  no node, so `empty` makes it by value; `set` and `clear` take
+  `Pin<&Self>`, so once set it stays put until dropped, and `index` pins an
+  element of a pinned slice. Its size comes from the build
+  (`cppgc__WeakPersistent_SIZE`): with cppgc's object names, on by default
+  on desktop builds, it keeps a `SourceLocation` (32 bytes on x64). kun
+  keeps the id table's weak persistents in chunks of these; on Windows the
+  `new` and `delete` were most of the NT heap's time in Speedometer.
 
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
