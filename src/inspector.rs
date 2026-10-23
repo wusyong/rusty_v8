@@ -154,6 +154,20 @@ unsafe extern "C" {
     humanReadableName: StringView,
     auxData: StringView,
   );
+  // kun: `contextCreated` with the context's origin.
+  fn v8_inspector__V8Inspector__contextCreatedWithOrigin(
+    this: *mut RawV8Inspector,
+    context: *const Context,
+    contextGroupId: int,
+    humanReadableName: StringView,
+    origin: StringView,
+    auxData: StringView,
+  );
+  // kun: `resetContextGroup`.
+  fn v8_inspector__V8Inspector__resetContextGroup(
+    this: *mut RawV8Inspector,
+    contextGroupId: int,
+  );
   fn v8_inspector__V8Inspector__contextDestroyed(
     this: *mut RawV8Inspector,
     context: *const Context,
@@ -193,6 +207,13 @@ unsafe extern "C" {
     stack_trace: *mut V8StackTrace,
     script_id: int,
   ) -> u32;
+  // kun: a promise's rejection handled after it was reported.
+  fn v8_inspector__V8Inspector__exceptionRevoked(
+    this: *mut RawV8Inspector,
+    context: *const Context,
+    exception_id: u32,
+    message: StringView,
+  );
   fn v8_inspector__V8Inspector__createStackTrace(
     this: *mut RawV8Inspector,
     stack_trace: *const StackTrace,
@@ -242,6 +263,14 @@ unsafe extern "C" fn v8_inspector__V8InspectorClient__BASE__generateUniqueId(
       .imp
       .generate_unique_id()
   }
+}
+
+// kun: the embedder's clock.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn v8_inspector__V8InspectorClient__BASE__currentTimeMS(
+  this: *mut RawV8InspectorClient,
+) -> f64 {
+  unsafe { V8InspectorClientHeap::from_raw(this).imp.current_time_ms() }
 }
 
 #[unsafe(no_mangle)]
@@ -587,6 +616,13 @@ pub trait V8InspectorClientImpl {
 
   fn generate_unique_id(&self) -> i64 {
     0 // 0 = let V8 pick a unique id itself
+  }
+
+  /// kun: ms since the epoch, as `Date.now()` (Blink's
+  /// `ThreadDebuggerCommonImpl::currentTimeMS`): the console's and the
+  /// protocol's times. V8's default answers 0.
+  fn current_time_ms(&self) -> f64 {
+    0.0
   }
 
   #[allow(clippy::too_many_arguments)]
@@ -1310,6 +1346,38 @@ impl V8Inspector {
     }
   }
 
+  // kun: `context_created` with the context's origin
+  // (`V8ContextInfo::origin`), which DevTools shows a context by.
+  /// [`Self::context_created`], with the context's origin.
+  pub fn context_created_with_origin(
+    &self,
+    context: Local<Context>,
+    context_group_id: i32,
+    human_readable_name: StringView,
+    origin: StringView,
+    aux_data: StringView,
+  ) {
+    unsafe {
+      v8_inspector__V8Inspector__contextCreatedWithOrigin(
+        self.raw(),
+        &*context,
+        context_group_id,
+        human_readable_name,
+        origin,
+        aux_data,
+      );
+    }
+  }
+
+  // kun: `resetContextGroup`, unbound upstream.
+  /// Every context of the group gone at once, with its console messages
+  /// (`Runtime.executionContextsCleared`).
+  pub fn reset_context_group(&self, context_group_id: i32) {
+    unsafe {
+      v8_inspector__V8Inspector__resetContextGroup(self.raw(), context_group_id)
+    }
+  }
+
   pub fn context_destroyed(&self, context: Local<Context>) {
     unsafe {
       v8_inspector__V8Inspector__contextDestroyed(self.raw(), &*context)
@@ -1413,6 +1481,25 @@ impl V8Inspector {
         column_number,
         stack_trace.into_raw(),
         script_id,
+      )
+    }
+  }
+
+  /// kun: the exception `exception_id` (what [`Self::exception_thrown`]
+  /// returned) is no longer unhandled: a promise's rejection was handled
+  /// after it was reported, as `message` says.
+  pub fn exception_revoked(
+    &self,
+    context: Local<Context>,
+    exception_id: u32,
+    message: StringView,
+  ) {
+    unsafe {
+      v8_inspector__V8Inspector__exceptionRevoked(
+        self.raw(),
+        &*context,
+        exception_id,
+        message,
       )
     }
   }

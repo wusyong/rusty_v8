@@ -34,6 +34,8 @@ unsafe extern "C" {
   fn v8__Message__GetEndColumn(this: *const Message) -> int;
   fn v8__Message__IsSharedCrossOrigin(this: *const Message) -> bool;
   fn v8__Message__IsOpaque(this: *const Message) -> bool;
+  // kun: the script's id.
+  fn v8__Message__GetScriptId(this: *const Message) -> int;
   fn v8__Message__GetStackTrace(this: *const Message) -> *const StackTrace;
 
   fn v8__StackTrace__CurrentStackTrace(
@@ -338,6 +340,14 @@ impl Message {
   #[inline(always)]
   pub fn get_end_column(&self) -> usize {
     unsafe { v8__Message__GetEndColumn(self) as usize }
+  }
+
+  // kun: the id of the script this Message is from (`GetScriptOrigin()`'s),
+  // which the inspector's `exception_thrown` takes.
+  /// The id of the script this Message is from.
+  #[inline(always)]
+  pub fn get_script_id(&self) -> int {
+    unsafe { v8__Message__GetScriptId(self) }
   }
 
   /// Passes on the value set by the embedder when it fed the script from which

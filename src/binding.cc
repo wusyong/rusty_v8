@@ -2458,6 +2458,11 @@ bool v8__Message__IsSharedCrossOrigin(const v8::Message& self) {
 
 bool v8__Message__IsOpaque(const v8::Message& self) { return self.IsOpaque(); }
 
+// kun: the script's id, which the inspector's `exceptionThrown` takes.
+int v8__Message__GetScriptId(const v8::Message& self) {
+  return self.GetScriptOrigin().ScriptId();
+}
+
 const v8::Value* v8__Exception__RangeError(const v8::String& message) {
   return local_to_ptr(v8::Exception::RangeError(ptr_to_local(&message)));
 }
@@ -3523,6 +3528,26 @@ void v8_inspector__V8Inspector__contextCreated(
   self->contextCreated(info);
 }
 
+// kun: `contextCreated` with the context's origin (`V8ContextInfo::origin`),
+// which DevTools shows a context by.
+void v8_inspector__V8Inspector__contextCreatedWithOrigin(
+    v8_inspector::V8Inspector* self, const v8::Context& context,
+    int contextGroupId, v8_inspector::StringView humanReadableName,
+    v8_inspector::StringView origin, v8_inspector::StringView auxData) {
+  v8_inspector::V8ContextInfo info(ptr_to_local(&context), contextGroupId,
+                                   humanReadableName);
+  info.origin = origin;
+  info.auxData = auxData;
+  self->contextCreated(info);
+}
+
+// kun: every context of the group gone at once, and its console messages
+// (`Runtime.executionContextsCleared`), as a page's main frame navigates.
+void v8_inspector__V8Inspector__resetContextGroup(
+    v8_inspector::V8Inspector* self, int contextGroupId) {
+  self->resetContextGroup(contextGroupId);
+}
+
 void v8_inspector__V8Inspector__contextDestroyed(
     v8_inspector::V8Inspector* self, const v8::Context& context) {
   self->contextDestroyed(ptr_to_local(&context));
@@ -3578,6 +3603,13 @@ unsigned v8_inspector__V8Inspector__exceptionThrown(
       detailed_message, url, line_number, column_number,
       static_cast<std::unique_ptr<v8_inspector::V8StackTrace>>(stack_trace),
       script_id);
+}
+
+// kun: a promise's rejection handled after it was reported.
+void v8_inspector__V8Inspector__exceptionRevoked(
+    v8_inspector::V8Inspector* self, const v8::Context& context,
+    unsigned exception_id, v8_inspector::StringView message) {
+  self->exceptionRevoked(ptr_to_local(&context), exception_id, message);
 }
 
 v8_inspector::V8StackTrace* v8_inspector__V8Inspector__createStackTrace(
@@ -3783,6 +3815,9 @@ v8_inspector::StringBuffer*
 v8_inspector__V8InspectorClient__BASE__resourceNameToUrl(
     v8_inspector::V8InspectorClient* self,
     const v8_inspector::StringView& resource_name_view);
+// kun: the embedder's clock.
+double v8_inspector__V8InspectorClient__BASE__currentTimeMS(
+    v8_inspector::V8InspectorClient* self);
 
 }  // extern "C"
 
@@ -3844,6 +3879,11 @@ struct v8_inspector__V8InspectorClient__BASE
         v8_inspector__V8InspectorClient__BASE__resourceNameToUrl(
             this, resource_name_view);
     return std::unique_ptr<v8_inspector::StringBuffer>(b);
+  }
+  // kun: the console's and the protocol's times (`consoleAPICalled`'s
+  // `timestamp`, `console.time`), which are 0 without it.
+  double currentTimeMS() override {
+    return v8_inspector__V8InspectorClient__BASE__currentTimeMS(this);
   }
 };
 
@@ -4150,54 +4190,6 @@ void v8__CpuProfiler__CollectSample(v8::Isolate* isolate,
 void v8__CpuProfiler__UseDetailedSourcePositionsForProfiling(
     v8::Isolate* isolate) {
   v8::CpuProfiler::UseDetailedSourcePositionsForProfiling(isolate);
-}
-
-// kun: a CpuProfiler started and stopped by the embedder (DevTools'
-// Profiler domain), its profile serialized as DevTools' JSON.
-v8::CpuProfiler* v8__CpuProfiler__New(v8::Isolate* isolate) {
-  return v8::CpuProfiler::New(isolate);
-}
-
-void v8__CpuProfiler__Dispose(v8::CpuProfiler* self) { self->Dispose(); }
-
-void v8__CpuProfiler__SetSamplingInterval(v8::CpuProfiler* self, int us) {
-  self->SetSamplingInterval(us);
-}
-
-bool v8__CpuProfiler__StartProfiling(v8::CpuProfiler* self,
-                                     v8::Isolate* isolate) {
-  v8::HandleScope scope(isolate);
-  return self->StartProfiling(v8::String::NewFromUtf8Literal(isolate, "kun"),
-                              /*record_samples=*/true) ==
-         v8::CpuProfilingStatus::kStarted;
-}
-
-bool v8__CpuProfiler__StopProfiling(v8::CpuProfiler* self,
-                                    v8::Isolate* isolate,
-                                    HeapSnapshotCallback callback, void* arg) {
-  struct OutputStream : public v8::OutputStream {
-    OutputStream(HeapSnapshotCallback callback, void* arg)
-        : callback_(callback), arg_(arg) {}
-    void EndOfStream() override {}
-    v8::OutputStream::WriteResult WriteAsciiChunk(char* data,
-                                                  int size) override {
-      assert(size >= 0);
-      if (callback_(arg_, data, static_cast<size_t>(size)))
-        return v8::OutputStream::kContinue;
-      return v8::OutputStream::kAbort;
-    }
-    HeapSnapshotCallback const callback_;
-    void* const arg_;
-  };
-
-  v8::HandleScope scope(isolate);
-  v8::CpuProfile* profile =
-      self->StopProfiling(v8::String::NewFromUtf8Literal(isolate, "kun"));
-  if (profile == nullptr) return false;
-  OutputStream stream(callback, arg);
-  profile->Serialize(&stream);
-  profile->Delete();
-  return true;
 }
 
 }  // extern "C"

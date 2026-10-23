@@ -312,13 +312,6 @@ Code changes are marked with `kun:` comments.
   function called on another origin's window throws instead of running
   (V8's default skips the check).
 
-- **`CpuProfiler`** (`src/cpu_profiler.rs`, `src/binding.cc`; 2026-10-21):
-  V8's `CpuProfiler` started and stopped by the embedder (kun's automation
-  pipe has DevTools' `Profiler` domain), its profile serialized by V8 as
-  DevTools' JSON (`CpuProfile::Serialize`) rather than read node by node.
-  A profile still running is stopped before the profiler is disposed:
-  `Dispose` alone leaves its sampling thread running. Only what kun needs;
-  upstream has no binding for it.
 - **`Template::set_lazy_data_property`** (`src/template.rs`,
   `src/binding.cc`; 2026-10-21): V8's `Template::SetLazyDataProperty`,
   unbound upstream (only `Object`'s is). kun installs a global's interface
@@ -344,6 +337,21 @@ Code changes are marked with `kun:` comments.
   keeps the id table's weak persistents in chunks of these; on Windows the
   `new` and `delete` were most of the NT heap's time in Speedometer.
 
+- **What kun's DevTools needs from the inspector** (`src/inspector.rs`,
+  `src/exception.rs`, `src/binding.cc`; 2026-10-23):
+  `V8InspectorClientImpl::current_time_ms` (`V8InspectorClient::currentTimeMS`,
+  unbound upstream, whose default answers 0: every `console` message's and
+  protocol event's time was 0), `V8Inspector::exception_revoked`
+  (`exceptionRevoked`: a promise's rejection handled after
+  `exception_thrown` reported it), `Message::get_script_id`
+  (`GetScriptOrigin().ScriptId()`: `exception_thrown` takes the script's
+  id, without which the inspector leaves the exception object out),
+  `V8Inspector::context_created_with_origin` (`contextCreated` with
+  `V8ContextInfo::origin`, which DevTools shows a context by; upstream's
+  `context_created` leaves it empty), and `V8Inspector::reset_context_group`
+  (`resetContextGroup`: a main frame's navigation clears its contexts and
+  console messages at once). kun's renderer connects Chrome's DevTools to
+  V8's inspector.
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
 - **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks
