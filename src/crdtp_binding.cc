@@ -261,6 +261,14 @@ std::vector<uint8_t>* v8_inspector__RemoteObject__toBytes(
   return bytes;
 }
 
+// kun: a stack as the protocol's `Runtime.StackTrace`, in CBOR.
+std::vector<uint8_t>* v8_inspector__V8StackTrace__buildInspectorObject(
+    const v8_inspector::V8StackTrace& self, int max_async_depth) {
+  auto* bytes = crdtp__vec_u8__new();
+  self.buildInspectorObject(max_async_depth)->AppendSerialized(bytes);
+  return bytes;
+}
+
 void crdtp__vec_u8__DELETE(std::vector<uint8_t>* self) { delete self; }
 
 size_t crdtp__vec_u8__size(const std::vector<uint8_t>* self) {

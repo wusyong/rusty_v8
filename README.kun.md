@@ -352,6 +352,17 @@ Code changes are marked with `kun:` comments.
   (`resetContextGroup`: a main frame's navigation clears its contexts and
   console messages at once). kun's renderer connects Chrome's DevTools to
   V8's inspector.
+- **The stack as script runs, for DevTools' initiators** (`src/inspector.rs`,
+  `src/binding.cc`, `src/crdtp_binding.cc`; 2026-10-24):
+  `V8Inspector::capture_stack_trace` (`captureStackTrace`),
+  `V8StackTrace::is_empty` and `V8StackTrace::build_inspector_object`
+  (`buildInspectorObject`, serialized to CBOR; upstream's
+  `crdtp::cbor_to_json` makes it JSON). As Blink's `CaptureSourceLocation`
+  and `BuildInspectorObject` give a request's initiator and a frame's
+  creator their stack, with the async chain V8's inspector keeps (`await`s
+  included). Upstream binds only `createStackTrace`, from a `v8::StackTrace`,
+  which has no async chain. C++: the prebuilt library changes. kun's
+  `bindings` test `stack_traces` checks the frames and the `await` parent.
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
 - **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks

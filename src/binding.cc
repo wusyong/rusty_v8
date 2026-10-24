@@ -3623,6 +3623,20 @@ void v8_inspector__V8StackTrace__DELETE(v8_inspector::V8StackTrace* self) {
   delete self;
 }
 
+// kun: the stack as script runs, with its async chain, as DevTools' Network
+// initiators have it (Blink's `SourceLocation::CaptureStackTraceInternal`).
+// Null outside any context group.
+v8_inspector::V8StackTrace* v8_inspector__V8Inspector__captureStackTrace(
+    v8_inspector::V8Inspector* self, bool full_stack) {
+  return self->captureStackTrace(full_stack).release();
+}
+
+// kun: whether a captured stack has no frames (no script was running).
+bool v8_inspector__V8StackTrace__isEmpty(
+    const v8_inspector::V8StackTrace& self) {
+  return self.isEmpty();
+}
+
 void v8_inspector__V8InspectorSession__DELETE(
     v8_inspector::V8InspectorSession* self) {
   delete self;

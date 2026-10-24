@@ -219,6 +219,18 @@ unsafe extern "C" {
     stack_trace: *const StackTrace,
   ) -> *mut V8StackTrace;
   fn v8_inspector__V8StackTrace__DELETE(this: *mut V8StackTrace);
+  // kun: the stack as script runs, with its async chain.
+  fn v8_inspector__V8Inspector__captureStackTrace(
+    this: *mut RawV8Inspector,
+    full_stack: bool,
+  ) -> *mut V8StackTrace;
+  // kun: `V8StackTrace::isEmpty`.
+  fn v8_inspector__V8StackTrace__isEmpty(this: *const V8StackTrace) -> bool;
+  // kun: `V8StackTrace::buildInspectorObject`, in CBOR.
+  fn v8_inspector__V8StackTrace__buildInspectorObject(
+    this: *const V8StackTrace,
+    max_async_depth: int,
+  ) -> *mut CppVecU8;
 }
 
 #[unsafe(no_mangle)]
@@ -1515,6 +1527,23 @@ impl V8Inspector {
       ))
     }
   }
+
+  // kun: `captureStackTrace`, for DevTools' Network initiators.
+  /// The stack as script runs, with the async chain the inspector keeps
+  /// (`await`s and the async tasks the embedder reports). With `full_stack`
+  /// false, as many frames as a session with `Runtime` enabled asks for, or
+  /// one. Null outside any context group; empty if no script is running.
+  pub fn capture_stack_trace(
+    &self,
+    full_stack: bool,
+  ) -> UniquePtr<V8StackTrace> {
+    unsafe {
+      UniquePtr::from_raw(v8_inspector__V8Inspector__captureStackTrace(
+        self.raw(),
+        full_stack,
+      ))
+    }
+  }
 }
 
 impl Drop for V8Inspector {
@@ -1527,6 +1556,26 @@ impl Drop for V8Inspector {
 #[derive(Debug)]
 pub struct V8StackTrace {
   _cxx_vtable: CxxVTable,
+}
+
+// kun: what kun's DevTools reads of a captured stack.
+impl V8StackTrace {
+  /// No frames: no script was running.
+  pub fn is_empty(&self) -> bool {
+    unsafe { v8_inspector__V8StackTrace__isEmpty(self) }
+  }
+
+  /// The protocol's `Runtime.StackTrace`, in CBOR
+  /// ([`crate::crdtp::cbor_to_json`] makes it JSON), with at most
+  /// `max_async_depth` async parents.
+  pub fn build_inspector_object(&self, max_async_depth: i32) -> Vec<u8> {
+    unsafe {
+      CppVecU8::take_from_raw(v8_inspector__V8StackTrace__buildInspectorObject(
+        self,
+        max_async_depth,
+      ))
+    }
+  }
 }
 
 impl Drop for V8StackTrace {
