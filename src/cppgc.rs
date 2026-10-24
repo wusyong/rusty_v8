@@ -54,6 +54,11 @@ unsafe extern "C" {
     init: unsafe extern "C" fn(obj: *mut RustObj, data: *mut c_void),
     data: *mut c_void,
   ) -> *mut RustObj;
+  // kun: see `HeapStatistics`.
+  fn v8__CppHeap__CollectStatisticsBrief(
+    heap: *mut Heap,
+    out: *mut HeapStatistics,
+  );
 
   fn cppgc__heap__enable_detached_garbage_collections_for_testing(
     heap: *mut Heap,
@@ -327,6 +332,19 @@ impl Heap {
     // SAFETY: the handle lives as long as the heap.
     unsafe { &*v8__CppHeap__GetAllocationHandle(self as *const Heap as *mut _) }
   }
+
+  // kun: see `HeapStatistics`.
+  pub fn collect_statistics(&self) -> HeapStatistics {
+    let mut stats = HeapStatistics::default();
+    // SAFETY: the heap is alive; `stats` is the struct C++ fills in.
+    unsafe {
+      v8__CppHeap__CollectStatisticsBrief(
+        self as *const Heap as *mut _,
+        &mut stats,
+      )
+    };
+    stats
+  }
 }
 
 // kun: where a heap allocates (`cppgc::AllocationHandle`). Every kind of
@@ -335,6 +353,22 @@ impl Heap {
 #[repr(C)]
 #[derive(Debug)]
 pub struct AllocationHandle(Opaque);
+
+// kun: a heap's sizes in bytes (`cppgc::HeapStatistics` at
+// `DetailLevel::kBrief`): what cppgc's counters already hold, so taking
+// them neither finishes sweeping nor runs a finalizer, and doesn't change
+// the GC being measured. `committed_size_bytes` and `resident_size_bytes`
+// include `pooled_memory_size_bytes` (freed pages cppgc keeps to reuse)
+// and drop as sweeping frees pages; `used_size_bytes` is what the last GC
+// marked plus what was allocated since.
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct HeapStatistics {
+  pub committed_size_bytes: usize,
+  pub resident_size_bytes: usize,
+  pub used_size_bytes: usize,
+  pub pooled_memory_size_bytes: usize,
+}
 
 /// Base trait for objects supporting garbage collection.
 ///

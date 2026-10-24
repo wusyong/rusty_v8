@@ -4874,6 +4874,30 @@ cppgc::AllocationHandle* v8__CppHeap__GetAllocationHandle(v8::CppHeap* heap) {
   return &heap->GetAllocationHandle();
 }
 
+// kun: the heap's sizes, for measuring a GC's memory. Only the brief
+// statistics: the detailed ones finish sweeping first, which would change
+// the GC being measured.
+struct HeapStatisticsBrief {
+  size_t committed_size_bytes;
+  size_t resident_size_bytes;
+  size_t used_size_bytes;
+  size_t pooled_memory_size_bytes;
+};
+
+static void CopyHeapStatisticsBrief(const cppgc::HeapStatistics& stats,
+                                    HeapStatisticsBrief* out) {
+  out->committed_size_bytes = stats.committed_size_bytes;
+  out->resident_size_bytes = stats.resident_size_bytes;
+  out->used_size_bytes = stats.used_size_bytes;
+  out->pooled_memory_size_bytes = stats.pooled_memory_size_bytes;
+}
+
+void v8__CppHeap__CollectStatisticsBrief(v8::CppHeap* heap,
+                                         HeapStatisticsBrief* out) {
+  CopyHeapStatisticsBrief(
+      heap->CollectStatistics(cppgc::HeapStatistics::kBrief), out);
+}
+
 // kun: a standalone `cppgc::Heap` (not a `v8::CppHeap`), for `cppgc::
 // standalone` in `src/cppgc/standalone.rs`: cppgc with no isolate,
 // scheduling its own GCs.
@@ -5041,6 +5065,16 @@ void cppgc__StandaloneHeap__MarkingStep(cppgc::Heap* heap) {
          cppgc::internal::GCConfig::MarkingType::kAtomic,
          internal->sweeping_support()});
   }
+}
+
+// kun: as `v8__CppHeap__CollectStatisticsBrief`. The public `cppgc::Heap`
+// has no `CollectStatistics`; its `HeapBase` does.
+void cppgc__StandaloneHeap__CollectStatisticsBrief(cppgc::Heap* heap,
+                                                   HeapStatisticsBrief* out) {
+  CopyHeapStatisticsBrief(
+      cppgc::internal::Heap::From(heap)->CollectStatistics(
+          cppgc::HeapStatistics::kBrief),
+      out);
 }
 
 // kun: wasm GC objects on cppgc, and a weak table of the objects a wasm

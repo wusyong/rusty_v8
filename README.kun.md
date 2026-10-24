@@ -369,6 +369,15 @@ Code changes are marked with `kun:` comments.
   included). Upstream binds only `createStackTrace`, from a `v8::StackTrace`,
   which has no async chain. C++: the prebuilt library changes. kun's
   `bindings` test `stack_traces` checks the frames and the `await` parent.
+- **A heap's sizes** (`src/cppgc.rs`, `src/cppgc/standalone.rs`,
+  `src/binding.cc`; 2026-10-24): `Heap::collect_statistics` and
+  `StandaloneHeap::collect_statistics`, cppgc's `CollectStatistics` at
+  `DetailLevel::kBrief` (committed, resident, used and pooled bytes),
+  unbound upstream. Only the brief level: the detailed one finishes
+  sweeping first, which would change the GC kun measures. The public
+  `cppgc::Heap` has no `CollectStatistics`, so the standalone heap's goes
+  through cppgc's internal `heap.h`, as `MarkingStep` does. C++: the
+  prebuilt library changes. kun's `dom` measures its GC with it.
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
 - **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks

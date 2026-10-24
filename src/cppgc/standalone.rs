@@ -19,7 +19,9 @@
 // tracing one casts cppgc's visitor to V8's `JSVisitor`, which only a
 // `CppHeap`'s is (an empty one returns before using the visitor).
 
-use super::{AllocationHandle, EmbedderStackState, HeapCreateParams};
+use super::{
+  AllocationHandle, EmbedderStackState, HeapCreateParams, HeapStatistics,
+};
 use super::{MarkingType, SweepingType};
 use crate::platform::{Platform, PlatformImpl};
 use crate::support::{Opaque, SharedRef};
@@ -43,6 +45,10 @@ unsafe extern "C" {
   );
   fn cppgc__StandaloneHeap__IsMarking(heap: *mut RawHeap) -> bool;
   fn cppgc__StandaloneHeap__MarkingStep(heap: *mut RawHeap);
+  fn cppgc__StandaloneHeap__CollectStatisticsBrief(
+    heap: *mut RawHeap,
+    out: *mut HeapStatistics,
+  );
 }
 
 /// `cppgc::Heap`.
@@ -136,6 +142,19 @@ impl StandaloneHeap {
   pub unsafe fn marking_step(&self) {
     // SAFETY: the heap is alive; the rest is the caller's to vouch for.
     unsafe { cppgc__StandaloneHeap__MarkingStep(self.heap.as_ptr()) }
+  }
+
+  /// The heap's sizes (see [`HeapStatistics`]).
+  pub fn collect_statistics(&self) -> HeapStatistics {
+    let mut stats = HeapStatistics::default();
+    // SAFETY: the heap is alive; `stats` is the struct C++ fills in.
+    unsafe {
+      cppgc__StandaloneHeap__CollectStatisticsBrief(
+        self.heap.as_ptr(),
+        &mut stats,
+      )
+    };
+    stats
   }
 }
 
