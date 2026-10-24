@@ -318,6 +318,12 @@ Code changes are marked with `kun:` comments.
   objects with it on the global's template, as Blink's
   `IDLMemberInstaller::InstallExposedConstructs` does on Window's instance
   template: a realm makes none of them until script reads one.
+- **`ObjectTemplate::mark_as_undetectable`** (`src/template.rs`,
+  `src/binding.cc`; 2026-10-24): V8's `ObjectTemplate::MarkAsUndetectable`,
+  unbound upstream. kun marks `HTMLAllCollection`'s instance template with
+  it, as Blink does, for `document.all`'s [[IsHTMLDDA]] (`typeof` is
+  `"undefined"`, `== null`, converts to `false`); its instances are callable
+  too (`set_call_as_function_handler`), which V8 requires of them.
 - **`Isolate::set_is_js_api_wrapper_native_error_callback`**
   (`src/isolate.rs`, `src/binding.cc`; 2026-10-22): V8's
   `SetIsJSApiWrapperNativeErrorCallback`, unbound upstream. V8 asks it

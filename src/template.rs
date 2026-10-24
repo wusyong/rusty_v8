@@ -169,6 +169,8 @@ unsafe extern "C" {
   );
 
   fn v8__ObjectTemplate__SetImmutableProto(this: *const ObjectTemplate);
+  // kun: `ObjectTemplate::MarkAsUndetectable`.
+  fn v8__ObjectTemplate__MarkAsUndetectable(this: *const ObjectTemplate);
 
   fn v8__ObjectTemplate__SetCallAsFunctionHandler(
     this: *const ObjectTemplate,
@@ -1126,6 +1128,18 @@ impl ObjectTemplate {
   #[inline(always)]
   pub fn set_immutable_proto(&self) {
     unsafe { v8__ObjectTemplate__SetImmutableProto(self) };
+  }
+
+  // kun: for HTML's `document.all`, whose [[IsHTMLDDA]] V8 implements as an
+  // undetectable object (Blink marks `HTMLAllCollection`'s template so).
+  /// Makes the instances of this template undetectable: `typeof` is
+  /// `"undefined"`, they are `== null` and convert to `false` (ECMAScript's
+  /// [[IsHTMLDDA]]). V8 requires them to be callable as well: set a
+  /// handler with [`set_call_as_function_handler`](Self::set_call_as_function_handler)
+  /// too.
+  #[inline(always)]
+  pub fn mark_as_undetectable(&self) {
+    unsafe { v8__ObjectTemplate__MarkAsUndetectable(self) };
   }
 
   /// Sets the callback to be used when calling instances created from this
