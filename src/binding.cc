@@ -35,6 +35,7 @@
 #include "v8.h"
 #include "v8/src/flags/flags.h"
 #include "v8/src/heap/cppgc-internal/heap.h"  // kun: standalone heap marking
+#include "v8/src/heap/cppgc-internal/stats-collector.h"  // kun: GC count
 #include "v8/src/libplatform/default-platform.h"
 
 using namespace support;
@@ -4951,6 +4952,20 @@ class StandaloneHeapTaskRunner final : public cppgc::TaskRunner {
   void* context_;
 };
 
+// kun: counts a standalone heap's GCs, each as its marking completes: the
+// one moment every GC has, atomic or incremental, whoever started it. cppgc
+// runs most of its GCs inside its own tasks, where the embedder doesn't see
+// them; the count around a task tells whether it collected.
+class StandaloneHeapGcCounter final
+    : public cppgc::internal::StatsCollector::AllocationObserver {
+ public:
+  void ResetAllocatedObjectSize(size_t) override { count_++; }
+  size_t count() const { return count_; }
+
+ private:
+  size_t count_ = 0;
+};
+
 class StandaloneHeapPlatform final : public cppgc::Platform {
  public:
   // `platform` outlives the heap: the Rust side holds a reference to it.
@@ -4993,11 +5008,20 @@ class StandaloneHeapPlatform final : public cppgc::Platform {
     return platform_->GetTracingController();
   }
 
+  // Here because the heap owns its platform: it lives as long as the heap.
+  StandaloneHeapGcCounter gcs;
+
  private:
   v8::Platform* platform_;
   void* context_;
   std::shared_ptr<StandaloneHeapTaskRunner> runner_;
 };
+
+static StandaloneHeapGcCounter& StandaloneHeapGcs(cppgc::Heap* heap) {
+  return static_cast<StandaloneHeapPlatform*>(
+             cppgc::internal::Heap::From(heap)->platform())
+      ->gcs;
+}
 
 cppgc::Heap* cppgc__StandaloneHeap__Create(
     v8::Platform* platform, void* context,
@@ -5007,10 +5031,14 @@ cppgc::Heap* cppgc__StandaloneHeap__Create(
   options.stack_support = cppgc::Heap::StackSupport::kNoConservativeStackScan;
   options.marking_support = marking_support;
   options.sweeping_support = sweeping_support;
-  return cppgc::Heap::Create(
-             std::make_shared<StandaloneHeapPlatform>(platform, context),
-             std::move(options))
-      .release();
+  cppgc::Heap* heap =
+      cppgc::Heap::Create(
+          std::make_shared<StandaloneHeapPlatform>(platform, context),
+          std::move(options))
+          .release();
+  cppgc::internal::Heap::From(heap)->stats_collector()->RegisterObserver(
+      &StandaloneHeapGcs(heap));
+  return heap;
 }
 
 // `cppgc::Heap`'s destructor finishes a GC that is marking but doesn't
@@ -5019,6 +5047,9 @@ cppgc::Heap* cppgc__StandaloneHeap__Create(
 // so a precise GC first reclaims and finalizes everything, and no
 // finalizer is skipped.
 void cppgc__StandaloneHeap__DELETE(cppgc::Heap* heap) {
+  // Nothing counts the last GC: no one can ask once the heap is gone.
+  cppgc::internal::Heap::From(heap)->stats_collector()->UnregisterObserver(
+      &StandaloneHeapGcs(heap));
   heap->ForceGarbageCollectionSlow("kun", "teardown",
                                    cppgc::EmbedderStackState::kNoHeapPointers);
   delete heap;
@@ -5037,6 +5068,10 @@ void cppgc__StandaloneHeap__ForceGarbageCollectionSlow(
 
 bool cppgc__StandaloneHeap__IsMarking(cppgc::Heap* heap) {
   return cppgc::subtle::HeapState::IsMarking(heap->GetHeapHandle());
+}
+
+size_t cppgc__StandaloneHeap__GcCount(cppgc::Heap* heap) {
+  return StandaloneHeapGcs(heap).count();
 }
 
 // One step of the incremental marking the heap started, then the GC's atomic

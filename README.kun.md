@@ -378,6 +378,16 @@ Code changes are marked with `kun:` comments.
   `cppgc::Heap` has no `CollectStatistics`, so the standalone heap's goes
   through cppgc's internal `heap.h`, as `MarkingStep` does. C++: the
   prebuilt library changes. kun's `dom` measures its GC with it.
+- **A standalone heap's GC count** (`src/cppgc/standalone.rs`,
+  `src/binding.cc`; 2026-10-25): `StandaloneHeap::gc_count`, the GCs whose
+  marking completed, counted by a `StatsCollector::AllocationObserver`
+  (cppgc's internal `stats-collector.h`) the heap's platform holds,
+  registered as the heap is created and unregistered before it is
+  destroyed. cppgc runs most of a standalone heap's GCs inside its own
+  tasks (an atomic one whole), where the embedder doesn't see them, and
+  the public `HeapState` tells only whether one is marking or sweeping.
+  Unbound upstream. C++: the prebuilt library changes. kun's `dom` records
+  when its heap collected with it.
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
 - **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks

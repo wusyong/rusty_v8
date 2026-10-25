@@ -44,6 +44,7 @@ unsafe extern "C" {
     stack_state: EmbedderStackState,
   );
   fn cppgc__StandaloneHeap__IsMarking(heap: *mut RawHeap) -> bool;
+  fn cppgc__StandaloneHeap__GcCount(heap: *mut RawHeap) -> usize;
   fn cppgc__StandaloneHeap__MarkingStep(heap: *mut RawHeap);
   fn cppgc__StandaloneHeap__CollectStatisticsBrief(
     heap: *mut RawHeap,
@@ -125,6 +126,16 @@ impl StandaloneHeap {
   pub fn is_marking(&self) -> bool {
     // SAFETY: the heap is alive.
     unsafe { cppgc__StandaloneHeap__IsMarking(self.heap.as_ptr()) }
+  }
+
+  /// How many GCs the heap has finished marking: each counts once, as its
+  /// marking completes, atomic or incremental, whoever started it (the
+  /// heap's tasks, a step, [`collect_garbage`](Self::collect_garbage)).
+  /// cppgc runs most of its GCs inside its own tasks; the count around a
+  /// task tells whether it collected.
+  pub fn gc_count(&self) -> usize {
+    // SAFETY: the heap is alive.
+    unsafe { cppgc__StandaloneHeap__GcCount(self.heap.as_ptr()) }
   }
 
   /// One step of the GC that is marking, and its final pause once marking
