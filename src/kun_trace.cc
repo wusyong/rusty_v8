@@ -41,6 +41,13 @@ namespace {
 perfetto::TracingSession* session = nullptr;
 int trace_fd = -1;
 
+// The memory the threads write their events into before the service copies
+// them into the session's buffer: Perfetto's largest. A thread finding it
+// full drops its events (the track event data source can't be made to
+// wait), and the SDK's default of 256 KB fills under a GC's bursts of
+// events (cppgc's marking steps on allocation, many a millisecond).
+constexpr uint32_t kSharedMemoryKb = 32 * 1024;
+
 int OpenForWriting(const char* path) {
 #if defined(_WIN32)
   return _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
@@ -113,6 +120,7 @@ bool kun__Trace__Start(const char* path, const char* const* categories,
   perfetto::TracingInitArgs args;
   args.backends = perfetto::kInProcessBackend;
   args.log_message_callback = LogErrors;
+  args.shmem_size_hint_kb = kSharedMemoryKb;
   perfetto::Tracing::Initialize(args);
   kun_trace::TrackEvent::Register();
 

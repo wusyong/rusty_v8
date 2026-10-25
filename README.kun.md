@@ -274,7 +274,12 @@ Code changes are marked with `kun:` comments.
   `TracingController` (`InitializeForPerfetto`) isn't used: its buffer is a
   fixed 4 MB ring that silently drops the start of a longer trace. Started
   before V8's platform is initialized: V8 registers its events only if
-  Perfetto is up by then.
+  Perfetto is up by then. The memory the threads write into before the
+  service copies their events (`shmem_size_hint_kb`) is Perfetto's largest,
+  32 MB (2026-10-25): with the SDK's 256 KB, replaying a recording of the
+  DOM's heap lost some of the main thread's events (cppgc's marking steps
+  on allocation, thousands a second), and the track event data source drops
+  rather than waits.
 - **User Timing in the trace** (`src/kun_trace.cc`, `src/kun_trace.rs`;
   2026-10-18): `v8::kun_trace::mark` and `measure` write the page's
   `performance.mark()` and `measure()` as Chrome's trace has them, under
