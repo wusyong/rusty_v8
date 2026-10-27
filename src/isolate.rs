@@ -924,6 +924,15 @@ impl UnsafeRawIsolatePtr {
 #[repr(C)]
 pub struct RealIsolate(Opaque);
 
+/// kun: `Internals::kIsolateEmbedderDataOffset` (`include/v8-internal.h`),
+/// where V8's isolate keeps its embedder data slots: summed from that
+/// header's layout constants for 64-bit pointers (the isolate's cage base,
+/// stack guard, flags, builtin tables, allocation infos, fast C call
+/// fields, thread-local top and handle scope data and implementer). A V8
+/// update must check it against that header.
+#[cfg(target_pointer_width = "64")]
+const EMBEDDER_DATA_OFFSET: usize = 688;
+
 impl Isolate {
   pub(crate) fn as_real_ptr(&self) -> *mut RealIsolate {
     self.0.as_ptr()
@@ -1295,6 +1304,8 @@ impl Isolate {
 
   /// Retrieve embedder-specific data from the isolate.
   /// Returns NULL if SetData has never been called for the given `slot`.
+  // kun: inlined, as V8's (a load: `get_data_internal`).
+  #[inline(always)]
   pub fn get_data(&self, slot: u32) -> *mut c_void {
     self.get_data_internal(Self::INTERNAL_DATA_SLOT_COUNT + slot)
   }
@@ -1315,7 +1326,20 @@ impl Isolate {
 
   #[inline(always)]
   pub(crate) fn get_data_internal(&self, slot: u32) -> *mut c_void {
-    unsafe { v8__Isolate__GetData(self.as_real_ptr(), slot) }
+    // kun: V8's `Isolate::GetData`, which its header inlines: the slot
+    // `EMBEDDER_DATA_OFFSET` bytes into the isolate, read here instead of
+    // a C++ call (every callback's scope reads the annex through it).
+    // Debug builds check it against V8's.
+    debug_assert!(slot < 4, "V8's kNumIsolateDataSlots");
+    let data = unsafe {
+      *(self.as_real_ptr() as *const u8)
+        .add(EMBEDDER_DATA_OFFSET + slot as usize * size_of::<usize>())
+        .cast::<*mut c_void>()
+    };
+    debug_assert_eq!(data, unsafe {
+      v8__Isolate__GetData(self.as_real_ptr(), slot)
+    });
+    data
   }
 
   #[inline(always)]

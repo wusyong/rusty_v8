@@ -108,6 +108,13 @@ Code changes are marked with `kun:` comments.
   `include/v8-function-callback.h` and `include/v8-internal.h`: debug builds
   also make V8's own call and assert both agree, at every callback kun's
   tests run. Rust only: the prebuilt V8 is unchanged.
+- **Isolate data read inline** (`src/isolate.rs`, 2026-10-27):
+  `get_data_internal` (and so the annex every scope looks up, and
+  `get_data`) reads V8's isolate data slots at
+  `Internals::kIsolateEmbedderDataOffset` (688 bytes into the isolate on
+  64-bit, summed from `include/v8-internal.h`'s layout constants), as V8's
+  inline `Isolate::GetData` does, instead of a C++ call. A V8 update must
+  check the offset; debug builds also call V8's and assert both agree.
 - **New objects are initialized in the constructor** (`src/support.h`,
   `src/binding.cc`, `src/cppgc.rs`): `RustObj`'s constructor takes a
   `RustObjInit` callback, and `make_garbage_collected` passes
