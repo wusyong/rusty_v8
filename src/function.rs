@@ -204,10 +204,72 @@ impl<'cb, T> ReturnValue<'cb, T> {
 impl<'cb> ReturnValue<'cb, Value> {
   #[inline(always)]
   pub fn from_function_callback_info(info: &'cb FunctionCallbackInfo) -> Self {
-    Self(
-      unsafe { RawReturnValue(v8__FunctionCallbackInfo__GetReturnValue(info)) },
-      PhantomData,
-    )
+    // kun: the return value's slot, read inline (`frame`).
+    let slot = info.slot(frame::RETURN_VALUE) as usize;
+    debug_assert_eq!(slot, unsafe {
+      v8__FunctionCallbackInfo__GetReturnValue(info)
+    });
+    Self(RawReturnValue(slot), PhantomData)
+  }
+}
+
+// kun: with pointer compression (and so V8's static roots, which kun's V8
+// has), the setters V8's header inlines write the return value's slot
+// here too, instead of a C++ call each: a Smi, an object's handle, or one
+// of the static roots (`include/v8-internal.h`'s
+// `EXPORTED_STATIC_ROOTS_PTR_LIST`), into the slot's lower 32 bits as
+// `ReturnValue::SetInternal` does. Debug builds write it V8's way too and
+// check the two are the same.
+#[cfg(feature = "v8_enable_pointer_compression")]
+mod static_roots {
+  pub(super) const UNDEFINED: usize = 0x11;
+  pub(super) const NULL: usize = 0x2d;
+  pub(super) const TRUE: usize = 0x71;
+  pub(super) const FALSE: usize = 0x55;
+  pub(super) const EMPTY_STRING: usize = 0x49;
+}
+
+/// kun: the largest Smi: 31-bit Smis with pointer compression.
+#[cfg(feature = "v8_enable_pointer_compression")]
+const SMI_MAX: i64 = (1 << 30) - 1;
+
+#[cfg(feature = "v8_enable_pointer_compression")]
+impl<T> ReturnValue<'_, T> {
+  /// kun: `ReturnValue::SetInternal`: `value`'s lower 32 bits into the
+  /// slot's, its upper ones (the cage's base) kept.
+  #[inline(always)]
+  fn set_internal(&mut self, value: usize) {
+    let slot = self.0.0 as *mut usize;
+    unsafe { *slot = (*slot & !0xffff_ffff) | (value & 0xffff_ffff) };
+  }
+
+  /// kun: writes the slot with `inline`, and in debug builds checks that
+  /// V8's own setter (`ffi`) writes the same.
+  #[inline(always)]
+  fn set_checked(
+    &mut self,
+    inline: impl FnOnce(&mut Self),
+    ffi: impl FnOnce(&mut RawReturnValue),
+  ) {
+    if cfg!(debug_assertions) {
+      let slot = self.0.0 as *mut usize;
+      let before = unsafe { *slot };
+      ffi(&mut self.0);
+      let want = unsafe { *slot };
+      unsafe { *slot = before };
+      inline(self);
+      assert_eq!(unsafe { *slot }, want, "V8's return value written inline");
+    } else {
+      inline(self);
+    }
+  }
+
+  /// kun: `value` as a Smi, if it is one.
+  #[inline(always)]
+  fn smi(value: i64) -> Option<usize> {
+    (-SMI_MAX - 1..=SMI_MAX)
+      .contains(&value)
+      .then(|| (value << 1) as usize)
   }
 }
 
@@ -224,21 +286,62 @@ where
 {
   #[inline(always)]
   pub fn set(&mut self, value: Local<T>) {
-    unsafe { v8__ReturnValue__Value__Set(&mut self.0, &*value.into()) }
+    let value: Local<Value> = value.into();
+    #[cfg(feature = "v8_enable_pointer_compression")]
+    {
+      // kun: the handle's object (`frame`, `set_internal`).
+      let object = unsafe { *(&*value as *const Value as *const usize) };
+      self.set_checked(
+        |rv| rv.set_internal(object),
+        |raw| unsafe { v8__ReturnValue__Value__Set(raw, &*value) },
+      );
+    }
+    #[cfg(not(feature = "v8_enable_pointer_compression"))]
+    unsafe {
+      v8__ReturnValue__Value__Set(&mut self.0, &*value)
+    }
   }
 
   #[inline(always)]
   pub fn set_bool(&mut self, value: bool) {
-    unsafe { v8__ReturnValue__Value__Set__Bool(&mut self.0, value) }
+    #[cfg(feature = "v8_enable_pointer_compression")]
+    self.set_checked(
+      |rv| {
+        rv.set_internal(if value {
+          static_roots::TRUE
+        } else {
+          static_roots::FALSE
+        })
+      },
+      |raw| unsafe { v8__ReturnValue__Value__Set__Bool(raw, value) },
+    );
+    #[cfg(not(feature = "v8_enable_pointer_compression"))]
+    unsafe {
+      v8__ReturnValue__Value__Set__Bool(&mut self.0, value)
+    }
   }
 
   #[inline(always)]
   pub fn set_int32(&mut self, value: i32) {
+    #[cfg(feature = "v8_enable_pointer_compression")]
+    if let Some(smi) = Self::smi(i64::from(value)) {
+      return self.set_checked(
+        |rv| rv.set_internal(smi),
+        |raw| unsafe { v8__ReturnValue__Value__Set__Int32(raw, value) },
+      );
+    }
     unsafe { v8__ReturnValue__Value__Set__Int32(&mut self.0, value) }
   }
 
   #[inline(always)]
   pub fn set_uint32(&mut self, value: u32) {
+    #[cfg(feature = "v8_enable_pointer_compression")]
+    if let Some(smi) = Self::smi(i64::from(value)) {
+      return self.set_checked(
+        |rv| rv.set_internal(smi),
+        |raw| unsafe { v8__ReturnValue__Value__Set__Uint32(raw, value) },
+      );
+    }
     unsafe { v8__ReturnValue__Value__Set__Uint32(&mut self.0, value) }
   }
 
@@ -249,17 +352,41 @@ where
 
   #[inline(always)]
   pub fn set_null(&mut self) {
-    unsafe { v8__ReturnValue__Value__SetNull(&mut self.0) }
+    #[cfg(feature = "v8_enable_pointer_compression")]
+    self.set_checked(
+      |rv| rv.set_internal(static_roots::NULL),
+      |raw| unsafe { v8__ReturnValue__Value__SetNull(raw) },
+    );
+    #[cfg(not(feature = "v8_enable_pointer_compression"))]
+    unsafe {
+      v8__ReturnValue__Value__SetNull(&mut self.0)
+    }
   }
 
   #[inline(always)]
   pub fn set_undefined(&mut self) {
-    unsafe { v8__ReturnValue__Value__SetUndefined(&mut self.0) }
+    #[cfg(feature = "v8_enable_pointer_compression")]
+    self.set_checked(
+      |rv| rv.set_internal(static_roots::UNDEFINED),
+      |raw| unsafe { v8__ReturnValue__Value__SetUndefined(raw) },
+    );
+    #[cfg(not(feature = "v8_enable_pointer_compression"))]
+    unsafe {
+      v8__ReturnValue__Value__SetUndefined(&mut self.0)
+    }
   }
 
   #[inline(always)]
   pub fn set_empty_string(&mut self) {
-    unsafe { v8__ReturnValue__Value__SetEmptyString(&mut self.0) }
+    #[cfg(feature = "v8_enable_pointer_compression")]
+    self.set_checked(
+      |rv| rv.set_internal(static_roots::EMPTY_STRING),
+      |raw| unsafe { v8__ReturnValue__Value__SetEmptyString(raw) },
+    );
+    #[cfg(not(feature = "v8_enable_pointer_compression"))]
+    unsafe {
+      v8__ReturnValue__Value__SetEmptyString(&mut self.0)
+    }
   }
 
   /// Getter. Creates a new Local<> so it comes with a certain performance
@@ -295,10 +422,35 @@ pub struct FunctionCallbackInfoParts<'cb> {
   pub length: int,
 }
 
+// kun: V8's `FunctionCallbackInfo` is the callback's frame's slots
+// (`values_`, `include/v8-function-callback.h`), which V8's header reads
+// inline; reading them here spares a C++ call each (the isolate, the
+// receiver, the return value's slot, the arguments' count and each
+// argument). The indices are the header's, with no embedded constant
+// pool (arm64, x64); debug builds check each read against V8's own.
+mod frame {
+  pub(super) const ARGC: isize = 0;
+  pub(super) const ISOLATE: isize = 5;
+  pub(super) const RETURN_VALUE: isize = 6;
+  pub(super) const RECEIVER: isize = 9;
+  pub(super) const FIRST_ARGUMENT: isize = 10;
+}
+
 impl FunctionCallbackInfo {
+  /// kun: the frame's slot at `index` (`frame`).
+  #[inline(always)]
+  fn slot(&self, index: isize) -> *mut usize {
+    (self as *const Self as *mut usize).wrapping_offset(index)
+  }
+
   #[inline(always)]
   pub(crate) fn get_isolate_ptr(&self) -> *mut RealIsolate {
-    unsafe { v8__FunctionCallbackInfo__GetIsolate(self) }
+    // kun: read inline (`frame`).
+    let isolate = unsafe { *self.slot(frame::ISOLATE) } as *mut RealIsolate;
+    debug_assert_eq!(isolate, unsafe {
+      v8__FunctionCallbackInfo__GetIsolate(self)
+    });
+    isolate
   }
 
   /// Returns the common callback entry values with a single C++ shim call.
@@ -326,11 +478,12 @@ impl FunctionCallbackInfo {
 
   #[inline(always)]
   pub(crate) fn this(&self) -> Local<'_, Object> {
-    unsafe {
-      let ptr = v8__FunctionCallbackInfo__This(self);
-      let nn = NonNull::new_unchecked(ptr as *mut _);
-      Local::from_non_null(nn)
-    }
+    // kun: the receiver's slot, read inline (`frame`).
+    let ptr = self.slot(frame::RECEIVER) as *mut Object;
+    debug_assert_eq!(ptr as *const Object, unsafe {
+      v8__FunctionCallbackInfo__This(self)
+    });
+    unsafe { Local::from_non_null(NonNull::new_unchecked(ptr)) }
   }
 
   #[inline]
@@ -349,11 +502,23 @@ impl FunctionCallbackInfo {
 
   #[inline(always)]
   pub(crate) fn length(&self) -> int {
-    unsafe { v8__FunctionCallbackInfo__Length(self) }
+    // kun: read inline (`frame`).
+    let length = unsafe { *self.slot(frame::ARGC) } as int;
+    debug_assert_eq!(length, unsafe { v8__FunctionCallbackInfo__Length(self) });
+    length
   }
 
   #[inline(always)]
   pub(crate) fn get(&self, index: int) -> Local<'_, Value> {
+    // kun: an argument there is, read inline (`frame`); past them,
+    // `undefined`, V8's.
+    if (0..self.length()).contains(&index) {
+      let ptr = self.slot(frame::FIRST_ARGUMENT + index as isize) as *mut Value;
+      debug_assert_eq!(ptr as *const Value, unsafe {
+        v8__FunctionCallbackInfo__Get(self, index)
+      });
+      return unsafe { Local::from_non_null(NonNull::new_unchecked(ptr)) };
+    }
     unsafe {
       let ptr = v8__FunctionCallbackInfo__Get(self, index);
       let nn = NonNull::new_unchecked(ptr as *mut Value);

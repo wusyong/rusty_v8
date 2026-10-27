@@ -95,6 +95,19 @@ releasing; the files are kept as the run's artifacts.
 
 Code changes are marked with `kun:` comments.
 
+- **Callback info read inline** (`src/function.rs`, 2026-10-27): a
+  function callback's isolate, receiver, argument count, arguments and
+  return value slot are read from V8's `FunctionCallbackInfo` slots
+  (`values_`) directly, as V8's header does inline, and with pointer
+  compression `ReturnValue`'s setters for objects, Smis, booleans, `null`,
+  `undefined` and the empty string write the slot's lower 32 bits as
+  `ReturnValue::SetInternal` does with static roots (the roots' values
+  from `include/v8-internal.h`). Upstream makes a C++ call for each, which
+  kun measured as about a fifth of a cheap DOM getter. The slot indices and
+  the roots are V8's, so a V8 update must check them against
+  `include/v8-function-callback.h` and `include/v8-internal.h`: debug builds
+  also make V8's own call and assert both agree, at every callback kun's
+  tests run. Rust only: the prebuilt V8 is unchanged.
 - **New objects are initialized in the constructor** (`src/support.h`,
   `src/binding.cc`, `src/cppgc.rs`): `RustObj`'s constructor takes a
   `RustObjInit` callback, and `make_garbage_collected` passes
