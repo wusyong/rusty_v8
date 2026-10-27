@@ -3,6 +3,8 @@ use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 use std::ptr::null;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 use crate::Array;
 use crate::Boolean;
@@ -236,11 +238,24 @@ const SMI_MAX: i64 = (1 << 30) - 1;
 #[cfg(feature = "v8_enable_pointer_compression")]
 impl<T> ReturnValue<'_, T> {
   /// kun: `ReturnValue::SetInternal`: `value`'s lower 32 bits into the
-  /// slot's, its upper ones (the cage's base) kept.
+  /// slot's, its upper ones (the cage's base) kept, with one store of the
+  /// whole slot. A plain store of the same value LLVM narrows to the lower
+  /// 32 bits (the upper ones are what it read), and the builtin that called
+  /// the callback reads the slot whole as soon as it returns: a narrow store
+  /// then a wide load of it can't forward, and the load waits for the store
+  /// to reach the cache (kun measured 2.3 ns of a 5.4 ns empty getter on
+  /// x86-64). An atomic store is never narrowed; relaxed, it is a plain
+  /// store (clang compiles V8's own `SetInternal` to the same).
   #[inline(always)]
   fn set_internal(&mut self, value: usize) {
-    let slot = self.0.0 as *mut usize;
-    unsafe { *slot = (*slot & !0xffff_ffff) | (value & 0xffff_ffff) };
+    // SAFETY: the callback's return value slot, an aligned `Address` that
+    // only this thread reads or writes while the callback runs.
+    let slot = unsafe { AtomicUsize::from_ptr(self.0.0 as *mut usize) };
+    let old = slot.load(Ordering::Relaxed);
+    slot.store(
+      (old & !0xffff_ffff) | (value & 0xffff_ffff),
+      Ordering::Relaxed,
+    );
   }
 
   /// kun: writes the slot with `inline`, and in debug builds checks that

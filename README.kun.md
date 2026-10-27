@@ -102,7 +102,10 @@ Code changes are marked with `kun:` comments.
   compression `ReturnValue`'s setters for objects, Smis, booleans, `null`,
   `undefined` and the empty string write the slot's lower 32 bits as
   `ReturnValue::SetInternal` does with static roots (the roots' values
-  from `include/v8-internal.h`). Upstream makes a C++ call for each, which
+  from `include/v8-internal.h`), in one relaxed atomic store of the whole
+  slot (2026-10-28): LLVM narrows a plain store of it to 32 bits, which the
+  builtin's 64-bit load right after the callback can't forward from (a
+  stall of about 2.3 ns per call on x86-64). Upstream makes a C++ call for each, which
   kun measured as about a fifth of a cheap DOM getter. The slot indices and
   the roots are V8's, so a V8 update must check them against
   `include/v8-function-callback.h` and `include/v8-internal.h`: debug builds
