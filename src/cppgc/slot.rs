@@ -416,7 +416,8 @@ impl<T> TracedSlot<T> {
     }
   }
 
-  fn raw(&self) -> *mut TracedReference<Data> {
+  // `pub(crate)` for `crate::kun`, which marks and resets slots too.
+  pub(crate) fn raw(&self) -> *mut TracedReference<Data> {
     self.storage.get().cast()
   }
 

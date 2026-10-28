@@ -33,6 +33,7 @@
 #include "v8-platform.h"
 #include "v8-profiler.h"
 #include "v8.h"
+#include "v8-kun.h"  // kun: the embedder heap marking with V8
 #include "v8/src/flags/flags.h"
 #include "v8/src/heap/cppgc-internal/heap.h"  // kun: standalone heap marking
 #include "v8/src/heap/cppgc-internal/stats-collector.h"  // kun: GC count
@@ -5797,6 +5798,255 @@ size_t simdutf__binary_to_base64(const char* input, size_t length, char* output,
                                  uint64_t options) {
   return simdutf::binary_to_base64(
       input, length, output, static_cast<simdutf::base64_options>(options));
+}
+
+}  // extern "C"
+
+// kun: the embedder heap marking with V8's major GCs (v8/include/v8-kun.h,
+// in kun's V8 fork), for kun's `bindings`.
+namespace {
+
+// An EmbedderMarking whose methods are Rust functions, called with `data`.
+class RustEmbedderMarking final : public v8::kun::EmbedderMarking {
+ public:
+  struct Fns {
+    void (*start)(void* data);
+    bool (*advance)(void* data, double max_duration_ms, bool in_atomic_pause);
+    bool (*is_done)(void* data);
+    void (*end)(void* data);
+    void* (*new_local)(void* data);
+    void (*hand)(void* data, void* local, void* object);
+    void (*publish)(void* data, void* local);
+    bool (*is_local_empty)(void* data, void* local);
+    void (*delete_local)(void* data, void* local);
+  };
+
+  RustEmbedderMarking(void* data, const Fns* fns) : data_(data), fns_(*fns) {}
+
+  void Start() override { fns_.start(data_); }
+  bool Advance(double max_duration_ms, bool in_atomic_pause) override {
+    return fns_.advance(data_, max_duration_ms, in_atomic_pause);
+  }
+  bool IsDone() override { return fns_.is_done(data_); }
+  void End() override { fns_.end(data_); }
+  void* NewLocal() override { return fns_.new_local(data_); }
+  // The locals' functions don't read the data: null is passed.
+  void Hand(void* local, void* object) override {
+    if (local) fns_.hand(nullptr, local, object);
+  }
+  void Publish(void* local) override {
+    if (local) fns_.publish(nullptr, local);
+  }
+  bool IsLocalEmpty(void* local) override {
+    return !local || fns_.is_local_empty(nullptr, local);
+  }
+  void DeleteLocal(void* local) override {
+    if (local) fns_.delete_local(nullptr, local);
+  }
+
+ private:
+  void* data_;
+  Fns fns_;
+};
+
+}  // namespace
+
+extern "C" {
+
+RustEmbedderMarking* v8__kun__EmbedderMarking__NEW(
+    void* data, const RustEmbedderMarking::Fns* fns) {
+  return new RustEmbedderMarking(data, fns);
+}
+
+// Deleted once no GC marks (v8__kun__FinishMarking) and the CppHeap no
+// longer has it: no V8 thread calls it any more, and its locals are gone
+// with the marking states that held them.
+void v8__kun__EmbedderMarking__DELETE(RustEmbedderMarking* marking) {
+  delete marking;
+}
+
+// Finishes a major GC's marking that runs (Chrome finishes its GC before it
+// detaches a CppHeap from its isolate): afterwards no V8 thread marks, nor
+// calls the embedder marking, until the next GC starts.
+void v8__kun__FinishMarking(v8::Isolate* isolate) {
+  v8::kun::FinishMarking(isolate);
+}
+
+void v8__kun__SetEmbedderMarking(v8::CppHeap* heap,
+                                 RustEmbedderMarking* marking) {
+  v8::kun::SetEmbedderMarking(heap, marking);
+}
+
+void v8__kun__ReportEmbedderAllocation(v8::Isolate* isolate, int64_t delta) {
+  v8::kun::ReportEmbedderAllocation(isolate, delta);
+}
+
+void v8__kun__Wrap(v8::Isolate* isolate, const v8::Object* wrapper,
+                   void* object, uint16_t tag) {
+  v8::kun::Wrap(isolate, ptr_to_local(wrapper), object, tag);
+}
+
+// A shallow copy of `object` (V8's Object::Clone): a new wrapper from a
+// boilerplate one, as Blink's V8PerContextData::CreateWrapperFromCache.
+const v8::Object* v8__kun__Object__Clone(v8::Isolate* isolate,
+                                         const v8::Object* object) {
+  return local_to_ptr(ptr_to_local(object)->Clone(isolate));
+}
+
+void* v8__kun__Unwrap(v8::Isolate* isolate, const v8::Object* wrapper,
+                      uint16_t tag) {
+  return v8::kun::Unwrap(isolate, ptr_to_local(wrapper), tag);
+}
+
+// An embedder heap's object's reference to its wrapper, in the object (8
+// bytes the embedder heap never reads): a droppable TracedReference, as
+// Blink's main world wrapper.
+void v8__kun__TracedReference__SetDroppable(v8::Isolate* isolate,
+                                            v8::TracedReference<v8::Object>* slot,
+                                            const v8::Object* value) {
+  slot->Reset(isolate, ptr_to_local(value),
+              v8::TracedReference<v8::Object>::IsDroppable{});
+}
+
+v8::kun::TracedMarker* v8__kun__TracedMarker__NEW(v8::Isolate* isolate) {
+  return new v8::kun::TracedMarker(isolate);
+}
+
+void v8__kun__TracedMarker__DELETE(v8::kun::TracedMarker* marker) {
+  delete marker;
+}
+
+void v8__kun__TracedMarker__Mark(v8::kun::TracedMarker* marker,
+                                 const v8::TracedReference<v8::Data>* ref) {
+  marker->Mark(*ref);
+}
+
+void v8__kun__TracedMarker__Publish(v8::kun::TracedMarker* marker) {
+  marker->Publish();
+}
+
+}  // extern "C"
+
+// kun: a parallel job of kun's GC (Rust's `gc::Job`) on V8's platform, so
+// that the embedder heap's GC shares V8's workers, as cppgc's does.
+namespace {
+
+// A JobTask whose run and concurrency are Rust functions, called with
+// `data`, which the task owns: `drop` frees it when V8 deletes the task
+// (which may be after the job is joined or cancelled, on any thread).
+class RustJobTask final : public v8::JobTask {
+ public:
+  struct Fns {
+    void (*run)(void* data, v8::JobDelegate* delegate);
+    size_t (*max_concurrency)(void* data, size_t worker_count);
+    void (*drop)(void* data);
+  };
+
+  RustJobTask(void* data, const Fns* fns) : data_(data), fns_(*fns) {}
+  ~RustJobTask() override { fns_.drop(data_); }
+
+  void Run(v8::JobDelegate* delegate) override { fns_.run(data_, delegate); }
+  size_t GetMaxConcurrency(size_t worker_count) const override {
+    return fns_.max_concurrency(data_, worker_count);
+  }
+
+ private:
+  void* data_;
+  Fns fns_;
+};
+
+}  // namespace
+
+extern "C" {
+
+v8::JobHandle* v8__kun__Platform__PostJob(v8::Platform* platform,
+                                          bool user_blocking, void* data,
+                                          const RustJobTask::Fns* fns) {
+  return platform
+      ->PostJob(user_blocking ? v8::TaskPriority::kUserBlocking
+                              : v8::TaskPriority::kUserVisible,
+                std::make_unique<RustJobTask>(data, fns))
+      .release();
+}
+
+void v8__kun__JobHandle__NotifyConcurrencyIncrease(v8::JobHandle* handle) {
+  handle->NotifyConcurrencyIncrease();
+}
+
+void v8__kun__JobHandle__Cancel(v8::JobHandle* handle) {
+  handle->Cancel();
+  delete handle;
+}
+
+void v8__kun__JobHandle__CancelAndDetach(v8::JobHandle* handle) {
+  handle->CancelAndDetach();
+  delete handle;
+}
+
+bool v8__kun__JobDelegate__ShouldYield(v8::JobDelegate* delegate) {
+  return delegate->ShouldYield();
+}
+
+void v8__kun__JobDelegate__NotifyConcurrencyIncrease(
+    v8::JobDelegate* delegate) {
+  delegate->NotifyConcurrencyIncrease();
+}
+
+}  // extern "C"
+
+// kun: V8's scavenge drops an unmodified wrapper whose droppable reference
+// an embedder heap's object holds (reclaim_unmodified_wrappers): the
+// embedder finds that object through the wrapper (any of kun's tags) and
+// resets its reference, as Blink's V8EmbedderRootsHandler does.
+namespace {
+
+class RustRootsHandler final : public v8::EmbedderRootsHandler {
+ public:
+  using ResetRootFn = void (*)(void* data, void* object,
+                               const v8::TracedReference<v8::Value>* handle);
+
+  RustRootsHandler(v8::Isolate* isolate, void* data, ResetRootFn reset_root)
+      : isolate_(isolate), data_(data), reset_root_(reset_root) {}
+
+  void ResetRoot(const v8::TracedReference<v8::Value>& handle) override {
+    void* object = v8::Object::Unwrap<void>(
+        isolate_, handle.As<v8::Object>(), v8::kun::kTagRange);
+    if (object) reset_root_(data_, object, &handle);
+  }
+
+ private:
+  v8::Isolate* isolate_;
+  void* data_;
+  ResetRootFn reset_root_;
+};
+
+}  // namespace
+
+extern "C" {
+
+RustRootsHandler* v8__kun__RootsHandler__NEW(
+    v8::Isolate* isolate, void* data, RustRootsHandler::ResetRootFn reset_root) {
+  auto* handler = new RustRootsHandler(isolate, data, reset_root);
+  isolate->SetEmbedderRootsHandler(handler);
+  return handler;
+}
+
+// Unregistered and deleted, on the isolate's thread: V8 calls it only
+// there, in its scavenges, so none runs meanwhile.
+void v8__kun__RootsHandler__DELETE(v8::Isolate* isolate,
+                                   RustRootsHandler* handler) {
+  isolate->SetEmbedderRootsHandler(nullptr);
+  delete handler;
+}
+
+// Resets `slot` if it refers to what `handle` does: the reference V8 asks
+// to reset, of the object `ResetRoot` found.
+bool v8__kun__TracedReference__ResetIfSame(
+    v8::TracedReference<v8::Object>* slot,
+    const v8::TracedReference<v8::Value>* handle) {
+  if (*slot != *handle) return false;
+  slot->Reset();
+  return true;
 }
 
 }  // extern "C"

@@ -416,6 +416,36 @@ Code changes are marked with `kun:` comments.
   the public `HeapState` tells only whether one is marking or sweeping.
   Unbound upstream. C++: the prebuilt library changes. kun's `dom` records
   when its heap collected with it.
+- **kun's own V8** (`.gitmodules`, the `v8` submodule; 2026-10-28): the
+  submodule points at kun's V8 fork (https://github.com/wusyong/v8, branch
+  `kun`), started from `c4ca1ecc`, the commit upstream's `v152.2.0` pins on
+  `denoland/v8`'s `15.2-lkgr-denoland`. That branch is re-made by Deno's
+  autoroll and force-pushed (on 2026-10-27 it no longer held `c4ca1ecc`,
+  which was still fetchable by its SHA), so the pinned commit lives on a
+  branch of kun's own too. The V8 fork's changes are in its own
+  `README.kun.md`: an embedder heap marking with V8's major GCs
+  (`include/v8-kun.h`). C++: the prebuilt library changes.
+- **An embedder heap marking with V8's major GCs** (`src/kun.rs`,
+  `src/binding.cc`; 2026-10-28): the glue's C functions for the V8 fork's
+  `v8-kun.h`, and `v8::kun`, their Rust: an `EmbedderMarking` set on an
+  isolate's `CppHeap` (V8 starts, advances and ends the embedder heap's
+  marking with its major GCs; finished, unset and deleted when its
+  registration drops, as Chrome finishes its GC before it detaches a
+  `CppHeap`), `wrap`/`unwrap` with the tags `0x4000..=0x4fff` (the
+  embedder's object's address, not a cppgc object's), `clone_object` (a
+  wrapper from a boilerplate one, V8's `Object::Clone`),
+  `TracedSlot::set_droppable` and a `RootsHandler` that resets the slot of
+  a wrapper V8's scavenge dropped, `TracedMarker` (the embedder heap's
+  threads marking its objects' `TracedReference`s into V8's worklists),
+  `report_embedder_allocation`, and `post_job` (a job on V8's platform,
+  `v8::JobTask`, which upstream doesn't bind from Rust). Thin: kun's
+  `bindings` builds the embedder heap's rules on them (`unified_heap`,
+  `gc_platform`). `TracedSlot::raw` is `pub(crate)` for it. Callbacks from
+  C++ abort on a panic. Only with pointer compression (the patch tells the
+  embedder's objects from cppgc's by their entries' tags). C++: the
+  prebuilt library changes. kun's `bindings` tests (`unified_heap`,
+  `unified_heap_marking`, `gc_platform`) run it with V8's full,
+  incremental and minor GCs.
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
 - **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks
@@ -432,7 +462,8 @@ Code changes are marked with `kun:` comments.
   from `RUSTY_V8_MIRROR`); upstream only tracks `gen/.gitkeep`, so it
   showed up as untracked.
 
-Otherwise `kun` is upstream's `v152.2.0` plus this file.
+Otherwise `kun` is upstream's `v152.2.0` plus this file, with the `v8`
+submodule at kun's V8 fork.
 
 ## Layout and setup
 
@@ -459,11 +490,15 @@ Source").
 
 1. `git fetch upstream tag vX.Y.Z --no-tags`, then rebase `kun` (or start a
    new branch) on that tag, matching the `v8` version kun moves to.
-2. `git submodule update --init --recursive --depth 1`.
-3. Reapply and recheck the local modifications listed above: upstream's
+2. In kun's V8 fork, rebase `kun` onto the commit that tag's `v8` submodule
+   pins (on `denoland/v8`'s branch for that V8 version), push it, and point
+   the submodule (and `.gitmodules`'s URL, which the rebase takes back to
+   upstream's) at it.
+3. `git submodule update --init --recursive --depth 1`.
+4. Reapply and recheck the local modifications listed above: upstream's
    changes to `make_garbage_collected`, `RustObj`, and the C functions the
    slots call (`cppgc__Member__*`, `v8__TracedReference__*`).
-4. In kun: rebuild from source (`python3 scripts/ci.py v8`, linked with
+5. In kun: rebuild from source (`python3 scripts/ci.py v8`, linked with
    `RUSTY_V8_ARCHIVE`), then `cargo test --workspace` and
    `python scripts/test.py matrix`, and recheck the assumptions in
    `crates/dom/soundness.md` (its "需要人工審查的地方" covers a `v8`

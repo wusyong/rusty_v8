@@ -1,6 +1,7 @@
 [submodule "v8"]
 	path = v8
-	url = https://github.com/denoland/v8.git
+	# kun: kun's V8 fork (README.kun.md, "kun's own V8").
+	url = https://github.com/wusyong/v8.git
 [submodule "build"]
 	path = build
 	url = https://github.com/denoland/chromium_build.git
