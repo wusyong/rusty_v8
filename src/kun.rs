@@ -8,7 +8,7 @@
 //!   advances it with each of its steps, asks whether it is done before it
 //!   finishes, and ends it once both are ([`EmbedderMarking`],
 //!   [`set_embedder_marking`]). The heap's used bytes count with cppgc's
-//!   ([`report_embedder_allocation`]).
+//!   ([`report_embedder_used_size`]).
 //! - **Wrappers.** A wrapper holds its object's address with a tag of
 //!   [`FIRST_TAG`]`..=`[`LAST_TAG`] (one per type; [`wrap`], [`unwrap`]):
 //!   V8's marking threads hand the object to the embedder heap's marking as
@@ -55,7 +55,7 @@ struct MarkingFns {
   start: unsafe extern "C" fn(*mut c_void),
   advance: unsafe extern "C" fn(*mut c_void, f64, bool) -> bool,
   is_done: unsafe extern "C" fn(*mut c_void) -> bool,
-  end: unsafe extern "C" fn(*mut c_void),
+  end: unsafe extern "C" fn(*mut c_void) -> usize,
   new_local: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
   hand: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void),
   publish: unsafe extern "C" fn(*mut c_void, *mut c_void),
@@ -73,6 +73,8 @@ struct JobFns {
 
 type ResetRootFn =
   unsafe extern "C" fn(*mut c_void, *mut c_void, *const RootHandle);
+type TryResetRootFn =
+  unsafe extern "C" fn(*mut c_void, *mut c_void, *const RootHandle) -> bool;
 
 unsafe extern "C" {
   fn v8__kun__EmbedderMarking__NEW(
@@ -82,7 +84,7 @@ unsafe extern "C" {
   fn v8__kun__EmbedderMarking__DELETE(marking: *mut c_void);
   fn v8__kun__FinishMarking(isolate: *mut RealIsolate);
   fn v8__kun__SetEmbedderMarking(heap: *const Heap, marking: *mut c_void);
-  fn v8__kun__ReportEmbedderAllocation(isolate: *mut RealIsolate, delta: i64);
+  fn v8__kun__ReportEmbedderUsedSize(isolate: *mut RealIsolate, used: usize);
   fn v8__kun__Wrap(
     isolate: *mut RealIsolate,
     wrapper: *const Object,
@@ -131,6 +133,7 @@ unsafe extern "C" {
     isolate: *mut RealIsolate,
     data: *mut c_void,
     reset_root: ResetRootFn,
+    try_reset_root: TryResetRootFn,
   ) -> *mut c_void;
   fn v8__kun__RootsHandler__DELETE(
     isolate: *mut RealIsolate,
@@ -163,8 +166,11 @@ pub trait EmbedderMarking: Sync + 'static {
   /// Whether nothing is left now (V8's locals published).
   fn is_done(&self) -> bool;
 
-  /// Both sides are done, in the pause, after V8 cleared what died.
-  fn end(&self);
+  /// Both sides are done, in the pause, after V8 cleared what died: the
+  /// embedder heap's used bytes after the marking, its live ones (what it
+  /// marked, and what it allocated meanwhile), which V8 counts as its size
+  /// from now on and sets its next limits from.
+  fn end(&self) -> usize;
 
   /// A marking thread's local, as V8 makes its marking state; none if the
   /// heap doesn't mark now.
@@ -293,9 +299,9 @@ unsafe extern "C" fn is_done<M: EmbedderMarking>(data: *mut c_void) -> bool {
   from_cxx(|| unsafe { marking::<M>(data) }.is_done())
 }
 
-unsafe extern "C" fn end<M: EmbedderMarking>(data: *mut c_void) {
+unsafe extern "C" fn end<M: EmbedderMarking>(data: *mut c_void) -> usize {
   // SAFETY: as `start`.
-  from_cxx(|| unsafe { marking::<M>(data) }.end());
+  from_cxx(|| unsafe { marking::<M>(data) }.end())
 }
 
 unsafe extern "C" fn new_local<M: EmbedderMarking>(
@@ -363,12 +369,12 @@ unsafe extern "C" fn delete_local<M: EmbedderMarking>(
   from_cxx(|| drop(unsafe { Box::from_raw(handoff.cast::<M::Local>()) }));
 }
 
-/// Tells V8 the embedder heap's used bytes changed by `delta` since last
-/// told: it counts them with cppgc's, and may start, advance or finish a
-/// major GC now, calling the embedder marking.
-pub fn report_embedder_allocation(isolate: &mut Isolate, delta: i64) {
+/// Tells V8 the embedder heap's used bytes are `used` now: it counts them
+/// with cppgc's, and on growth may start, advance or finish a major GC now,
+/// calling the embedder marking.
+pub fn report_embedder_used_size(isolate: &mut Isolate, used: usize) {
   // SAFETY: the isolate, on its thread.
-  unsafe { v8__kun__ReportEmbedderAllocation(isolate.as_real_ptr(), delta) };
+  unsafe { v8__kun__ReportEmbedderUsedSize(isolate.as_real_ptr(), used) };
 }
 
 // --- Wrappers ----------------------------------------------------------------
@@ -688,7 +694,10 @@ impl RootHandle {
   ///
   /// # Safety
   ///
-  /// On the heap's thread, the slot's writer's.
+  /// On the heap's thread, the slot's writer's; or in V8's parallel reset
+  /// of this handle (`RootsHandler::try_reset_root`), on any of its
+  /// threads: the slot is then the one this refers to, whose node V8 lets
+  /// the thread free (each thread frees in the blocks it processes).
   pub unsafe fn reset_if_same<T>(&self, slot: &TracedSlot<T>) -> bool {
     // SAFETY: as the caller promises; `self` is V8's, alive for the call.
     unsafe { v8__kun__TracedReference__ResetIfSame(slot.raw(), self) }
@@ -697,10 +706,22 @@ impl RootHandle {
 
 /// What resets the references to the wrappers V8's scavenge drops
 /// (`v8::EmbedderRootsHandler`, Blink's `V8EmbedderRootsHandler`).
-pub trait RootsHandler: 'static {
+pub trait RootsHandler: Sync + 'static {
   /// V8 dropped an unmodified wrapper holding `object` (one of the tags),
   /// which `handle` refers to: on the isolate's thread, in its scavenge.
   fn reset_root(&self, object: NonNull<c_void>, handle: &RootHandle);
+
+  /// As `reset_root`, but on any of V8's threads, in parallel, a handle
+  /// each (`TryResetRoot`): whether the reference is reset; if not, V8
+  /// calls `reset_root` for it on the isolate's thread.
+  fn try_reset_root(
+    &self,
+    object: NonNull<c_void>,
+    handle: &RootHandle,
+  ) -> bool {
+    let _ = (object, handle);
+    false
+  }
 }
 
 /// A roots handler set on an isolate ([`set_roots_handler`]): unset and
@@ -736,6 +757,18 @@ pub unsafe fn set_roots_handler<H: RootsHandler>(
       }
     });
   }
+  unsafe extern "C" fn try_reset_root<H: RootsHandler>(
+    data: *mut c_void,
+    object: *mut c_void,
+    handle: *const RootHandle,
+  ) -> bool {
+    from_cxx(|| {
+      // SAFETY: as `reset_root`'s; `H: Sync`, called from V8's threads.
+      NonNull::new(object).is_some_and(|object| unsafe {
+        (*data.cast::<H>()).try_reset_root(object, &*handle)
+      })
+    })
+  }
   /// Drops the `Box<H>` at `handler`.
   unsafe fn drop_box<H>(handler: *mut c_void) {
     // SAFETY: as the caller promises: `Box::into_raw` of a `Box<H>`,
@@ -746,7 +779,12 @@ pub unsafe fn set_roots_handler<H: RootsHandler>(
   // SAFETY: the isolate, on its thread; `handler` lives until the glue's
   // object is unset and deleted.
   let glue = unsafe {
-    v8__kun__RootsHandler__NEW(isolate.as_real_ptr(), handler, reset_root::<H>)
+    v8__kun__RootsHandler__NEW(
+      isolate.as_real_ptr(),
+      handler,
+      reset_root::<H>,
+      try_reset_root::<H>,
+    )
   };
   RootsHandlerRegistration {
     isolate: isolate.as_real_ptr(),

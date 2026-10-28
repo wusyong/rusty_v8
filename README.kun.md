@@ -461,9 +461,12 @@ Code changes are marked with `kun:` comments.
   embedder's object's address, not a cppgc object's), `clone_object` (a
   wrapper from a boilerplate one, V8's `Object::Clone`),
   `TracedSlot::set_droppable` and a `RootsHandler` that resets the slot of
-  a wrapper V8's scavenge dropped, `TracedMarker` (the embedder heap's
+  a wrapper V8's scavenge dropped (`TryResetRoot` on V8's threads in
+  parallel, as Blink's `BlinkRootsHandler`, else `ResetRoot`), `TracedMarker` (the embedder heap's
   threads marking its objects' `TracedReference`s into V8's worklists),
-  `report_embedder_allocation`, and `post_job` (a job on V8's platform,
+  `report_embedder_used_size` (the embedder heap's used bytes, a total;
+  a marking's `end` returns its live ones, which V8 sets its limits from),
+  and `post_job` (a job on V8's platform,
   `v8::JobTask`, which upstream doesn't bind from Rust). Thin: kun's
   `bindings` builds the embedder heap's rules on them (`unified_heap`,
   `gc_platform`). `TracedSlot::raw` is `pub(crate)` for it. Callbacks from

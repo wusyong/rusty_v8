@@ -5813,7 +5813,7 @@ class RustEmbedderMarking final : public v8::kun::EmbedderMarking {
     void (*start)(void* data);
     bool (*advance)(void* data, double max_duration_ms, bool in_atomic_pause);
     bool (*is_done)(void* data);
-    void (*end)(void* data);
+    size_t (*end)(void* data);
     void* (*new_local)(void* data);
     void (*hand)(void* data, void* local, void* object);
     void (*publish)(void* data, void* local);
@@ -5828,7 +5828,7 @@ class RustEmbedderMarking final : public v8::kun::EmbedderMarking {
     return fns_.advance(data_, max_duration_ms, in_atomic_pause);
   }
   bool IsDone() override { return fns_.is_done(data_); }
-  void End() override { fns_.end(data_); }
+  size_t End() override { return fns_.end(data_); }
   void* NewLocal() override { return fns_.new_local(data_); }
   // The locals' functions don't read the data: null is passed.
   void Hand(void* local, void* object) override {
@@ -5877,8 +5877,8 @@ void v8__kun__SetEmbedderMarking(v8::CppHeap* heap,
   v8::kun::SetEmbedderMarking(heap, marking);
 }
 
-void v8__kun__ReportEmbedderAllocation(v8::Isolate* isolate, int64_t delta) {
-  v8::kun::ReportEmbedderAllocation(isolate, delta);
+void v8__kun__ReportEmbedderUsedSize(v8::Isolate* isolate, size_t used) {
+  v8::kun::ReportEmbedderUsedSize(isolate, used);
 }
 
 void v8__kun__Wrap(v8::Isolate* isolate, const v8::Object* wrapper,
@@ -6004,9 +6004,15 @@ class RustRootsHandler final : public v8::EmbedderRootsHandler {
  public:
   using ResetRootFn = void (*)(void* data, void* object,
                                const v8::TracedReference<v8::Value>* handle);
+  using TryResetRootFn = bool (*)(void* data, void* object,
+                                  const v8::TracedReference<v8::Value>* handle);
 
-  RustRootsHandler(v8::Isolate* isolate, void* data, ResetRootFn reset_root)
-      : isolate_(isolate), data_(data), reset_root_(reset_root) {}
+  RustRootsHandler(v8::Isolate* isolate, void* data, ResetRootFn reset_root,
+                   TryResetRootFn try_reset_root)
+      : isolate_(isolate),
+        data_(data),
+        reset_root_(reset_root),
+        try_reset_root_(try_reset_root) {}
 
   void ResetRoot(const v8::TracedReference<v8::Value>& handle) override {
     void* object = v8::Object::Unwrap<void>(
@@ -6014,10 +6020,22 @@ class RustRootsHandler final : public v8::EmbedderRootsHandler {
     if (object) reset_root_(data_, object, &handle);
   }
 
+  // On V8's threads, in parallel, a handle each (Blink's BlinkRootsHandler
+  // resets its reference there too): resetting the reference frees the
+  // node V8 passes, in the block that thread processes, which V8 allows
+  // then (TracedHandles::FreeNode with disable_block_handling_on_free_). A
+  // wrapper of no object of the tags is left to ResetRoot.
+  bool TryResetRoot(const v8::TracedReference<v8::Value>& handle) override {
+    void* object = v8::Object::Unwrap<void>(
+        isolate_, handle.As<v8::Object>(), v8::kun::kTagRange);
+    return object && try_reset_root_(data_, object, &handle);
+  }
+
  private:
   v8::Isolate* isolate_;
   void* data_;
   ResetRootFn reset_root_;
+  TryResetRootFn try_reset_root_;
 };
 
 }  // namespace
@@ -6025,14 +6043,17 @@ class RustRootsHandler final : public v8::EmbedderRootsHandler {
 extern "C" {
 
 RustRootsHandler* v8__kun__RootsHandler__NEW(
-    v8::Isolate* isolate, void* data, RustRootsHandler::ResetRootFn reset_root) {
-  auto* handler = new RustRootsHandler(isolate, data, reset_root);
+    v8::Isolate* isolate, void* data, RustRootsHandler::ResetRootFn reset_root,
+    RustRootsHandler::TryResetRootFn try_reset_root) {
+  auto* handler =
+      new RustRootsHandler(isolate, data, reset_root, try_reset_root);
   isolate->SetEmbedderRootsHandler(handler);
   return handler;
 }
 
-// Unregistered and deleted, on the isolate's thread: V8 calls it only
-// there, in its scavenges, so none runs meanwhile.
+// Unregistered and deleted, on the isolate's thread: V8 calls it only in
+// its scavenges (ResetRoot on that thread, TryResetRoot on its workers,
+// joined before the scavenge ends), so none runs meanwhile.
 void v8__kun__RootsHandler__DELETE(v8::Isolate* isolate,
                                    RustRootsHandler* handler) {
   isolate->SetEmbedderRootsHandler(nullptr);
