@@ -117,6 +117,20 @@ Code changes are marked with `kun:` comments.
   for it (`Local::new` is a C++ call). The isolate is checked as
   `Global::open` checks it; debug builds also make V8's own call and
   assert both agree (as the other inline setters). Rust only.
+- **`v8::kun::one_byte_chars`** (`src/kun.rs`, 2026-10-28): a sequential
+  one-byte string's characters (or a thin string's, forwarding to one) read
+  in place, as V8's header reads a string's fields: the map's instance type
+  (`kFirstNonstringType`, `kStringRepresentationMask`,
+  `kStringEncodingMask`, `kSeqStringTag | kOneByteStringTag`,
+  `kThinStringTag`), the length after the map and the hash, the characters
+  (or a thin string's forward) after the length
+  (`Internals::kStringResourceOffset`). `None` for another representation.
+  `unsafe`: the slice lives while no GC runs. kun reads its DOM members'
+  string arguments with it, where `ValueView` cost about 540 instructions an
+  argument. A V8 update must check the constants against
+  `include/v8-internal.h`, `src/objects/string.h` and
+  `src/objects/instance-type.h`; debug builds check every read against
+  `ValueView`'s. Rust only.
 - **Isolate data read inline** (`src/isolate.rs`, 2026-10-27):
   `get_data_internal` (and so the annex every scope looks up, and
   `get_data`) reads V8's isolate data slots at

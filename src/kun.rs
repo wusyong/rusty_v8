@@ -507,6 +507,92 @@ const LAST_JS_API_OBJECT_TYPE: u16 = 0x80a;
 /// a heap object's address rounded down to it is its cage's base.
 const CAGE_ALIGNMENT: usize = 1 << 32;
 
+/// kun: `string`'s characters if it is a sequential one-byte string, or a
+/// thin one (an internalized string's forward) to one, read in place as
+/// V8's header reads a string's fields (`Internals::kStringResourceOffset`
+/// is the first byte past the header): the map's instance type, the length
+/// after the hash, the characters after the length. `None` for another
+/// representation (cons, sliced, external, two-byte), which V8's
+/// `ValueView` reads. Debug builds check it against `ValueView`'s.
+///
+/// # Safety
+///
+/// `string` is `isolate`'s, and no GC runs while the slice lives: a GC may
+/// move the string (or free a thin string's forward).
+#[inline(always)]
+pub unsafe fn one_byte_chars<'s>(
+  isolate: &Isolate,
+  string: &'s crate::String,
+) -> Option<&'s [u8]> {
+  // SAFETY: as `unwrap_inline`'s: a handle's location holds its string's
+  // tagged address, whose map (compressed, in its cage) holds its instance
+  // type; a string's length follows its map and hash, a sequential one's
+  // characters its length, a thin one's forward (compressed) its length.
+  let chars = unsafe {
+    let mut object = *(string as *const crate::String).cast::<usize>();
+    let cage = object & !(CAGE_ALIGNMENT - 1);
+    let field =
+      |object: usize, offset: usize| object - HEAP_OBJECT_TAG + offset;
+    let mut forwarded = false;
+    loop {
+      let map = cage + (field(object, 0) as *const u32).read() as usize;
+      let instance_type = ((map - HEAP_OBJECT_TAG + MAP_INSTANCE_TYPE_OFFSET)
+        as *const u16)
+        .read();
+      if instance_type >= FIRST_NONSTRING_TYPE {
+        break None;
+      }
+      match instance_type & STRING_REPRESENTATION_AND_ENCODING {
+        SEQ_ONE_BYTE_STRING => {
+          let length =
+            (field(object, STRING_LENGTH_OFFSET) as *const u32).read();
+          break Some(std::slice::from_raw_parts(
+            field(object, STRING_HEADER_SIZE) as *const u8,
+            length as usize,
+          ));
+        }
+        // An internalized string's forward is never another forward.
+        tag if tag & STRING_REPRESENTATION == THIN_STRING && !forwarded => {
+          forwarded = true;
+          object = cage
+            + (field(object, STRING_HEADER_SIZE) as *const u32).read() as usize;
+        }
+        _ => break None,
+      }
+    }
+  };
+  #[cfg(debug_assertions)]
+  if let Some(chars) = chars {
+    // SAFETY: as the caller promises, `string` is `isolate`'s and alive.
+    let view = unsafe { crate::ValueView::new_from_ref(isolate, string) };
+    match view.data() {
+      crate::ValueViewData::OneByte(bytes) => assert_eq!(chars, bytes),
+      crate::ValueViewData::TwoByte(_) => {
+        panic!("a one-byte string read as two-byte")
+      }
+    }
+  }
+  #[cfg(not(debug_assertions))]
+  let _ = isolate;
+  chars
+}
+
+/// kun: a string's fields (`include/v8-internal.h`, `src/objects/string.h`,
+/// `src/objects/instance-type.h`): its length after the map and the hash
+/// (pointer compression's 4-byte map), its header's size (a sequential
+/// string's characters, a thin string's forward, follow it), the first
+/// instance type past the strings' (`Internals::kFirstNonstringType`),
+/// and the representation and encoding bits of a string's instance type
+/// (`kStringRepresentationMask`, `kStringEncodingMask`).
+const STRING_LENGTH_OFFSET: usize = 4 + 4;
+const STRING_HEADER_SIZE: usize = 4 + 4 + 4;
+const FIRST_NONSTRING_TYPE: u16 = 0x80;
+const STRING_REPRESENTATION: u16 = 0x07;
+const STRING_REPRESENTATION_AND_ENCODING: u16 = 0x0f;
+/// `kSeqStringTag | kOneByteStringTag`, `kThinStringTag`.
+const SEQ_ONE_BYTE_STRING: u16 = 0x08;
+const THIN_STRING: u16 = 0x05;
+
 /// A shallow copy of `object` (V8's `Object::Clone`): a new wrapper from a
 /// boilerplate one, as Blink's `V8PerContextData::CreateWrapperFromCache`,
 /// instead of instantiating its template again.
