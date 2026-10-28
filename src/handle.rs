@@ -1041,6 +1041,17 @@ impl<T> Weak<T> {
     }
   }
 
+  /// kun: the handle's location (holding the object, as a local's does)
+  /// if V8 still has the object, checked to be `isolate`'s: for
+  /// `ReturnValue::set_weak`, which reads it with no local handle made.
+  #[inline]
+  pub(crate) fn location(&self, isolate: &Isolate) -> Option<NonNull<T>> {
+    let data = self.get_pointer()?;
+    let handle_host: HandleHost = (&self.isolate_handle).into();
+    handle_host.assert_match_isolate(isolate);
+    Some(data)
+  }
+
   pub fn to_local<'s>(
     &self,
     scope: &PinScope<'s, '_, ()>,

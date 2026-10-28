@@ -317,6 +317,87 @@ where
     }
   }
 
+  /// kun: `ReturnValue::Set(const BasicTracedReference<S>&)`: the object
+  /// `slot` refers to, read from its node, with no local handle made for it
+  /// (`TracedSlot::get` is a C++ call making one); `false`, writing
+  /// nothing, if the slot is empty.
+  ///
+  /// # Safety
+  ///
+  /// As `TracedSlot::get`: on the slot's heap's thread, `scope`'s isolate
+  /// that heap's.
+  #[inline(always)]
+  pub unsafe fn set_traced<S>(
+    &mut self,
+    scope: &crate::PinScope<'_, '_, ()>,
+    slot: &crate::cppgc::TracedSlot<S>,
+  ) -> bool
+  where
+    for<'s> Local<'s, S>: Into<Local<'s, T>>,
+  {
+    // SAFETY: on the heap's thread, as the caller promises.
+    let Some(object) = (unsafe { slot.object_address() }) else {
+      return false;
+    };
+    #[cfg(feature = "v8_enable_pointer_compression")]
+    self.set_checked(
+      |rv| rv.set_internal(object),
+      |raw| unsafe {
+        let value = slot.get(scope).expect("a traced reference set");
+        v8__ReturnValue__Value__Set(raw, &*value as *const S as *const Value)
+      },
+    );
+    #[cfg(not(feature = "v8_enable_pointer_compression"))]
+    unsafe {
+      let value = slot.get(scope).expect("a traced reference set");
+      v8__ReturnValue__Value__Set(
+        &mut self.0,
+        &*value as *const S as *const Value,
+      )
+    }
+    #[cfg(feature = "v8_enable_pointer_compression")]
+    let _ = scope;
+    true
+  }
+
+  /// kun: `ReturnValue::Set` of a weak global's object, read from the
+  /// handle's own location, with no local handle made for it (what
+  /// `Weak::to_local` and then `set` cost: a call into V8); `false`,
+  /// writing nothing, if V8 collected the object.
+  ///
+  /// # Panics
+  ///
+  /// If `value` is another isolate's.
+  #[inline(always)]
+  pub fn set_weak<S>(
+    &mut self,
+    isolate: &Isolate,
+    value: &crate::Weak<S>,
+  ) -> bool
+  where
+    for<'s> Local<'s, S>: Into<Local<'s, T>>,
+  {
+    let Some(location) = value.location(isolate) else {
+      return false;
+    };
+    let value = location.as_ptr() as *const Value;
+    #[cfg(feature = "v8_enable_pointer_compression")]
+    {
+      // SAFETY: the location of a live weak global (V8 empties it before it
+      // collects the object), holding the object as a local's does.
+      let object = unsafe { *(value as *const usize) };
+      self.set_checked(
+        |rv| rv.set_internal(object),
+        |raw| unsafe { v8__ReturnValue__Value__Set(raw, value) },
+      );
+    }
+    #[cfg(not(feature = "v8_enable_pointer_compression"))]
+    unsafe {
+      v8__ReturnValue__Value__Set(&mut self.0, value)
+    }
+    true
+  }
+
   /// kun: `ReturnValue::Set(const Global<S>&)`: `value`'s object, read
   /// from the global's own slot, with no local handle made for it (what
   /// `Local::new` and then `set` cost: a call into V8).

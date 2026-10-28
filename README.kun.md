@@ -111,12 +111,18 @@ Code changes are marked with `kun:` comments.
   `include/v8-function-callback.h` and `include/v8-internal.h`: debug builds
   also make V8's own call and assert both agree, at every callback kun's
   tests run. Rust only: the prebuilt V8 is unchanged.
-- **`ReturnValue::set_global`** (`src/function.rs`, 2026-10-28): a global's
-  object written into the return value slot from the global's own slot, as
-  V8's `ReturnValue::Set(const Global<S>&)` does, with no local handle made
-  for it (`Local::new` is a C++ call). The isolate is checked as
-  `Global::open` checks it; debug builds also make V8's own call and
-  assert both agree (as the other inline setters). Rust only.
+- **`ReturnValue::set_global`, `set_weak`, `set_traced`** (`src/function.rs`,
+  `src/handle.rs`, `src/cppgc/slot.rs`, 2026-10-28): a global's, a weak
+  global's or a `TracedSlot`'s object written into the return value slot
+  from the handle's own location (a traced reference's node's object, as
+  `BasicTracedReference::ptr` reads it), as V8's `ReturnValue::Set` of a
+  `Global` or a `BasicTracedReference` does, with no local handle made for
+  it (`Local::new`, `Weak::to_local` and `TracedSlot::get` are C++ calls).
+  `set_weak` and `set_traced` write nothing and return `false` for a
+  collected or empty handle. The isolate is checked as `Global::open` and
+  `Weak::to_local` check it (`Weak::location`, `pub(crate)`); debug builds
+  also make V8's own call and assert both agree (as the other inline
+  setters). Rust only.
 - **`v8::kun::one_byte_chars`** (`src/kun.rs`, 2026-10-28): a sequential
   one-byte string's characters (or a thin string's, forwarding to one) read
   in place, as V8's header reads a string's fields: the map's instance type

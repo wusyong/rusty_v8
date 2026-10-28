@@ -13,9 +13,10 @@
 //   `operator=`, `GetAtomic` in `Visitor::Trace`, `SetSlotThreadSafe` /
 //   `GetSlotThreadSafe` for `TracedReference`). These slots keep the bytes in
 //   an `UnsafeCell` and hand C++ a raw pointer for every write and trace, as
-//   `AtomicPtr` does. The one Rust reference ever made into them is the
-//   `&AtomicPtr` of `TracedSlot::is_empty`, which, like any reference to an
-//   atomic, allows the concurrent atomic stores C++ makes.
+//   `AtomicPtr` does. The only Rust references ever made into them are the
+//   `&AtomicPtr`s of `TracedSlot::is_empty` and `object_address`, which,
+//   like any reference to an atomic, allow the concurrent atomic stores C++
+//   makes.
 // - **Alignment.** Upstream's storage is a `[u8; N]`, so it is 1-aligned and
 //   may land at any offset (after a `bool`, in an enum variant). C++
 //   accesses the slot as a `std::atomic`, which must be aligned. These slots
@@ -469,6 +470,23 @@ impl<T> TracedSlot<T> {
         v8__TracedReference__Get(self.raw(), sd.get_isolate_ptr()) as *const T
       })
     }
+  }
+
+  /// kun: the object the slot refers to, read in place as V8's header
+  /// reads it (`BasicTracedReference::ptr`: the slot points to its node's
+  /// object, a full address), or `None` if the slot is empty.
+  ///
+  /// # Safety
+  ///
+  /// As `get`: on the heap's thread.
+  #[inline(always)]
+  pub(crate) unsafe fn object_address(&self) -> Option<usize> {
+    // SAFETY: the storage is the C++ object's one pointer (`location_`),
+    // written atomically; a non-empty one points to a live node's object
+    // field (only this thread resets it), which this thread wrote.
+    let location = unsafe { &*self.storage.get().cast::<AtomicPtr<usize>>() };
+    let location = location.load(Ordering::Relaxed);
+    (!location.is_null()).then(|| unsafe { *location })
   }
 
   /// `visitor->Trace(*this)` if the slot isn't empty. Safe to run on a
