@@ -408,11 +408,104 @@ pub fn unwrap(
   wrapper: Local<Object>,
   tag: u16,
 ) -> Option<NonNull<c_void>> {
-  // SAFETY: the isolate, on its thread, and a handle of it.
-  NonNull::new(unsafe {
-    v8__kun__Unwrap(isolate.as_real_ptr(), &*wrapper, tag)
+  // kun: an API wrapper (every wrapper made from a template) read here, as
+  // V8's header inlines `Object::Unwrap`, not a C++ call: a getter's whole
+  // floor is a few of those. Debug builds check it against the glue's.
+  let object = match unsafe { unwrap_inline(isolate, wrapper, tag) } {
+    Some(object) => object,
+    // Another object (V8 checks what it is).
+    None => NonNull::new(unsafe {
+      v8__kun__Unwrap(isolate.as_real_ptr(), &*wrapper, tag)
+    }),
+  };
+  debug_assert_eq!(object, unsafe {
+    NonNull::new(v8__kun__Unwrap(isolate.as_real_ptr(), &*wrapper, tag))
+  });
+  object
+}
+
+/// `wrapper`'s object if it is an API wrapper, read as V8's header reads
+/// it (`Internals::CanHaveInternalField`, `internal::ReadCppHeapPointerField`):
+/// its map's instance type checked, then its `CppHeapPointerHandle`, the
+/// isolate's table's entry, the entry's tag. `None` for another object
+/// (`Some(None)` for an API wrapper of no object of `tag`'s).
+///
+/// # Safety
+///
+/// `isolate` is `wrapper`'s, on its thread.
+#[inline(always)]
+unsafe fn unwrap_inline(
+  isolate: &Isolate,
+  wrapper: Local<Object>,
+  tag: u16,
+) -> Option<Option<NonNull<c_void>>> {
+  // SAFETY: a handle's location holds its heap object's tagged address,
+  // whose map (compressed, in its cage) holds its instance type; an API
+  // wrapper's handle field follows its header, and the isolate's table
+  // holds its entry, read atomically as V8 does.
+  let entry = unsafe {
+    let object = *(&*wrapper as *const Object).cast::<usize>();
+    let field = |offset: usize| object - HEAP_OBJECT_TAG + offset;
+    let map = (object & !(CAGE_ALIGNMENT - 1))
+      + (field(0) as *const u32).read() as usize;
+    let instance_type =
+      ((map - HEAP_OBJECT_TAG + MAP_INSTANCE_TYPE_OFFSET) as *const u16).read();
+    if instance_type != JS_SPECIAL_API_OBJECT_TYPE
+      && !(FIRST_JS_API_OBJECT_TYPE..=LAST_JS_API_OBJECT_TYPE)
+        .contains(&instance_type)
+    {
+      return None;
+    }
+    let handle = (field(JS_OBJECT_HEADER_SIZE) as *const u32).read();
+    let table = *(isolate.as_real_ptr() as *const u8)
+      .add(CPP_HEAP_POINTER_TABLE_OFFSET)
+      .cast::<*const std::sync::atomic::AtomicUsize>();
+    (*table.add((handle >> INDEX_SHIFT) as usize))
+      .load(std::sync::atomic::Ordering::Relaxed)
+  };
+  // The tag in the low 16 bits, shifted by one over the marking bit; the
+  // null handle's entry, all zeros, fails it.
+  let actual = u32::from(entry as u16);
+  let first = u32::from(tag) << TAG_SHIFT;
+  Some(if actual == first || actual == first + 1 {
+    NonNull::new((entry >> PAYLOAD_SHIFT) as *mut c_void)
+  } else {
+    None
   })
 }
+
+/// kun: where the isolate keeps its `CppHeapPointerTable`'s base
+/// (`Internals::kIsolateCppHeapPointerTableOffset`, `include/v8-internal.h`):
+/// past the embedder data slots (`kNumIsolateDataSlots`, 4), the external
+/// pointer table (`kExternalEntityTableSize`: 4 pointers and 4 `uint32_t`s)
+/// and the shared one's address. A V8 update must check it against that
+/// header.
+#[cfg(target_pointer_width = "64")]
+const CPP_HEAP_POINTER_TABLE_OFFSET: usize =
+  crate::isolate::EMBEDDER_DATA_OFFSET + 4 * 8 + (4 * 8 + 4 * 4) + 8;
+/// A JS object's header (`Internals::kJSObjectHeaderSize`: 3 tagged words,
+/// compressed): an API wrapper's `CppHeapPointerHandle` follows it.
+const JS_OBJECT_HEADER_SIZE: usize = 3 * 4;
+/// A tagged heap object pointer's tag (`kHeapObjectTag`).
+const HEAP_OBJECT_TAG: usize = 1;
+/// A handle's index's shift (`kExternalPointerIndexShift`, desktop
+/// platforms').
+const INDEX_SHIFT: u32 = 6;
+/// An entry's tag's and payload's shifts (`kCppHeapPointerTagShift`,
+/// `kCppHeapPointerPayloadShift`).
+const TAG_SHIFT: u32 = 1;
+const PAYLOAD_SHIFT: u32 = 16;
+/// A map's instance type's offset (`Internals::kMapInstanceTypeOffset`),
+/// and the API wrappers' types, which hold a `CppHeapPointerHandle` after
+/// their header (`Internals::kJSSpecialApiObjectType`,
+/// `kFirstJSApiObjectType`, `kLastJSApiObjectType`).
+const MAP_INSTANCE_TYPE_OFFSET: usize = 4 + 4;
+const JS_SPECIAL_API_OBJECT_TYPE: u16 = 0x410;
+const FIRST_JS_API_OBJECT_TYPE: u16 = 0x422;
+const LAST_JS_API_OBJECT_TYPE: u16 = 0x80a;
+/// The pointer compression cage's alignment (`kPtrComprCageBaseAlignment`):
+/// a heap object's address rounded down to it is its cage's base.
+const CAGE_ALIGNMENT: usize = 1 << 32;
 
 /// A shallow copy of `object` (V8's `Object::Clone`): a new wrapper from a
 /// boilerplate one, as Blink's `V8PerContextData::CreateWrapperFromCache`,

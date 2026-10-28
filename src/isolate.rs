@@ -931,7 +931,7 @@ pub struct RealIsolate(Opaque);
 /// fields, thread-local top and handle scope data and implementer). A V8
 /// update must check it against that header.
 #[cfg(target_pointer_width = "64")]
-const EMBEDDER_DATA_OFFSET: usize = 688;
+pub(crate) const EMBEDDER_DATA_OFFSET: usize = 688;
 
 impl Isolate {
   pub(crate) fn as_real_ptr(&self) -> *mut RealIsolate {

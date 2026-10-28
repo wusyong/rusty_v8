@@ -317,6 +317,39 @@ where
     }
   }
 
+  /// kun: `ReturnValue::Set(const Global<S>&)`: `value`'s object, read
+  /// from the global's own slot, with no local handle made for it (what
+  /// `Local::new` and then `set` cost: a call into V8).
+  ///
+  /// # Panics
+  ///
+  /// If `value` is another isolate's.
+  #[inline(always)]
+  pub fn set_global<S>(
+    &mut self,
+    isolate: &mut Isolate,
+    value: &crate::Global<S>,
+  ) where
+    for<'s> Local<'s, S>: Into<Local<'s, T>>,
+  {
+    // SAFETY: the global is alive (borrowed), of `isolate` (checked by
+    // `open`); its slot holds the object as a local's does.
+    let value = unsafe { value.open(isolate) } as *const S as *const Value;
+    #[cfg(feature = "v8_enable_pointer_compression")]
+    {
+      // kun: the slot's object, as `set` reads a local's.
+      let object = unsafe { *(value as *const usize) };
+      self.set_checked(
+        |rv| rv.set_internal(object),
+        |raw| unsafe { v8__ReturnValue__Value__Set(raw, value) },
+      );
+    }
+    #[cfg(not(feature = "v8_enable_pointer_compression"))]
+    unsafe {
+      v8__ReturnValue__Value__Set(&mut self.0, value)
+    }
+  }
+
   #[inline(always)]
   pub fn set_bool(&mut self, value: bool) {
     #[cfg(feature = "v8_enable_pointer_compression")]

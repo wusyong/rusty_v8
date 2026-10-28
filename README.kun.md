@@ -111,6 +111,12 @@ Code changes are marked with `kun:` comments.
   `include/v8-function-callback.h` and `include/v8-internal.h`: debug builds
   also make V8's own call and assert both agree, at every callback kun's
   tests run. Rust only: the prebuilt V8 is unchanged.
+- **`ReturnValue::set_global`** (`src/function.rs`, 2026-10-28): a global's
+  object written into the return value slot from the global's own slot, as
+  V8's `ReturnValue::Set(const Global<S>&)` does, with no local handle made
+  for it (`Local::new` is a C++ call). The isolate is checked as
+  `Global::open` checks it; debug builds also make V8's own call and
+  assert both agree (as the other inline setters). Rust only.
 - **Isolate data read inline** (`src/isolate.rs`, 2026-10-27):
   `get_data_internal` (and so the annex every scope looks up, and
   `get_data`) reads V8's isolate data slots at
@@ -446,6 +452,20 @@ Code changes are marked with `kun:` comments.
   prebuilt library changes. kun's `bindings` tests (`unified_heap`,
   `unified_heap_marking`, `gc_platform`) run it with V8's full,
   incremental and minor GCs.
+  `unwrap` reads an API wrapper's object inline (2026-10-28), as V8's
+  header inlines `Object::Unwrap` (`Internals::CanHaveInternalField`,
+  `internal::ReadCppHeapPointerField`): the map's instance type
+  (`JS_SPECIAL_API_OBJECT_TYPE`, `FIRST_`/`LAST_JS_API_OBJECT_TYPE`), the
+  `CppHeapPointerHandle` after the object's header
+  (`Internals::kJSObjectHeaderSize`), the isolate's table
+  (`Internals::kIsolateCppHeapPointerTableOffset`, past the embedder data
+  slots, which is why `EMBEDDER_DATA_OFFSET` is `pub(crate)`) and the
+  entry's tag and payload (`kExternalPointerIndexShift`,
+  `kCppHeapPointerTagShift`, `kCppHeapPointerPayloadShift`); any other
+  object goes through the glue's C function. A V8 update must check those
+  constants (`src/kun.rs`) against `include/v8-internal.h`; debug builds
+  also call the glue's and assert both agree, at every unwrap kun's tests
+  make.
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
 - **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks
