@@ -316,6 +316,13 @@ void v8__Isolate__SetPromiseRejectCallback(v8::Isolate* isolate,
   isolate->SetPromiseRejectCallback(callback);
 }
 
+// kun: what an access a refused access check reported throws (Blink's
+// `FailedAccessCheckCallbackInMainThread`: a `SecurityError`).
+void v8__Isolate__SetFailedAccessCheckCallbackFunction(
+    v8::Isolate* isolate, v8::FailedAccessCheckCallback callback) {
+  isolate->SetFailedAccessCheckCallbackFunction(callback);
+}
+
 void v8__Isolate__SetWasmAsyncResolvePromiseCallback(
     v8::Isolate* isolate, v8::WasmAsyncResolvePromiseCallback callback) {
   isolate->SetWasmAsyncResolvePromiseCallback(callback);
@@ -1583,6 +1590,40 @@ void v8__ObjectTemplate__SetIndexedPropertyHandler(
   ptr_to_local(&self)->SetHandler(v8::IndexedPropertyHandlerConfiguration(
       getter, setter, query, deleter, enumerator, definer, descriptor,
       ptr_to_local(data_or_null), flags));
+}
+
+// kun: a cross-origin object's access check, and the interceptors its
+// properties go through when it refuses (Blink's `V8Window`, `V8Location`).
+void v8__ObjectTemplate__SetAccessCheckCallbackAndHandler(
+    const v8::ObjectTemplate& self, v8::AccessCheckCallback callback,
+    v8::NamedPropertyGetterCallback named_getter,
+    v8::NamedPropertySetterCallbackV2 named_setter,
+    v8::NamedPropertyQueryCallback named_query,
+    v8::NamedPropertyDeleterCallback named_deleter,
+    v8::NamedPropertyEnumeratorCallback named_enumerator,
+    v8::NamedPropertyDefinerCallbackV2 named_definer,
+    v8::NamedPropertyDescriptorCallback named_descriptor,
+    const v8::Value* named_data_or_null, v8::PropertyHandlerFlags named_flags,
+    v8::IndexedPropertyGetterCallbackV2 indexed_getter,
+    v8::IndexedPropertySetterCallback indexed_setter,
+    v8::IndexedPropertyQueryCallbackV2 indexed_query,
+    v8::IndexedPropertyDeleterCallbackV2 indexed_deleter,
+    v8::IndexedPropertyEnumeratorCallback indexed_enumerator,
+    v8::IndexedPropertyDefinerCallback indexed_definer,
+    v8::IndexedPropertyDescriptorCallbackV2 indexed_descriptor,
+    const v8::Value* indexed_data_or_null,
+    v8::PropertyHandlerFlags indexed_flags, const v8::Value* data_or_null) {
+  ptr_to_local(&self)->SetAccessCheckCallbackAndHandler(
+      callback,
+      v8::NamedPropertyHandlerConfiguration(
+          named_getter, named_setter, named_query, named_deleter,
+          named_enumerator, named_definer, named_descriptor,
+          ptr_to_local(named_data_or_null), named_flags),
+      v8::IndexedPropertyHandlerConfiguration(
+          indexed_getter, indexed_setter, indexed_query, indexed_deleter,
+          indexed_enumerator, indexed_definer, indexed_descriptor,
+          ptr_to_local(indexed_data_or_null), indexed_flags),
+      ptr_to_local(data_or_null));
 }
 
 void v8__ObjectTemplate__SetAccessorProperty(const v8::ObjectTemplate& self,

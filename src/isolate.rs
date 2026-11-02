@@ -171,6 +171,27 @@ pub type PromiseHook =
 
 pub type PromiseRejectCallback = unsafe extern "C" fn(PromiseRejectMessage);
 
+/// kun: V8's `AccessType`, what an access a refused access check reported
+/// (`Isolate::set_failed_access_check_callback_function`) was.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessType {
+  Get,
+  Set,
+  Has,
+  Delete,
+  Keys,
+}
+
+/// kun: V8's `FailedAccessCheckCallback`: an access an access check
+/// refused, on the object (`target`) with its check's `data`, which throws
+/// (V8 throws a `TypeError` if it doesn't).
+pub type FailedAccessCheckCallback = unsafe extern "C" fn(
+  target: Local<Object>,
+  access: AccessType,
+  data: Local<Value>,
+);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub enum WasmAsyncSuccess {
@@ -785,6 +806,11 @@ unsafe extern "C" {
   fn v8__Isolate__SetPromiseRejectCallback(
     isolate: *mut RealIsolate,
     callback: PromiseRejectCallback,
+  );
+  // kun: `Isolate::set_failed_access_check_callback_function`.
+  fn v8__Isolate__SetFailedAccessCheckCallbackFunction(
+    isolate: *mut RealIsolate,
+    callback: FailedAccessCheckCallback,
   );
   fn v8__Isolate__SetWasmAsyncResolvePromiseCallback(
     isolate: *mut RealIsolate,
@@ -1668,6 +1694,24 @@ impl Isolate {
   ) {
     unsafe {
       v8__Isolate__SetPromiseRejectCallback(self.as_real_ptr(), callback)
+    }
+  }
+
+  /// kun: V8's `Isolate::SetFailedAccessCheckCallbackFunction`: what an
+  /// access an access check refused and no interceptor took (a delete, a
+  /// define, a prototype set) throws, instead of V8's `TypeError` (HTML's
+  /// `SecurityError` across origins; Blink's
+  /// `FailedAccessCheckCallbackInMainThread`).
+  #[inline(always)]
+  pub fn set_failed_access_check_callback_function(
+    &mut self,
+    callback: FailedAccessCheckCallback,
+  ) {
+    unsafe {
+      v8__Isolate__SetFailedAccessCheckCallbackFunction(
+        self.as_real_ptr(),
+        callback,
+      )
     }
   }
 

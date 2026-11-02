@@ -102,6 +102,19 @@ Code changes are marked with `kun:` comments.
   made with it (`ContextOptions::global_object`, upstream's). It changes
   the glue: kun links a V8 built from this checkout (`RUSTY_V8_ARCHIVE`)
   until a release has it.
+- **Cross-origin access checks** (`src/template.rs`, `src/isolate.rs`,
+  `src/scope.rs`, `src/binding.cc`, 2026-11-02): V8's
+  `ObjectTemplate::SetAccessCheckCallbackAndHandler`
+  (`set_access_check_callback_and_handler`, with `AccessCheckCallback`)
+  and `Isolate::SetFailedAccessCheckCallbackFunction`
+  (`set_failed_access_check_callback_function`, with `AccessType` and
+  `FailedAccessCheckCallback`), for kun's cross-origin `Window` and
+  `Location` (HTML's cross-origin objects, Blink's `V8Window` and
+  `V8Location` interceptors: a refused access goes through the handler's
+  interceptors, what else is refused throws a `SecurityError`); and
+  `GetIsolate` for `Local<Object>` (the thread's current isolate, as
+  `Local<Context>`'s), so that the refused access's callback, given only
+  the object, opens a `CallbackScope`. It changes the glue too.
 - **`get_incumbent_context`** (`src/scope.rs`, `src/scope/raw.rs`,
   `src/binding.cc`, 2026-11-02): V8's `Isolate::GetIncumbentContext`, the
   realm of the most recent script on the stack (HTML's incumbent realm),

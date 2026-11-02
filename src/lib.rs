@@ -138,6 +138,9 @@ pub use isolate::OwnedIsolate;
 pub use isolate::PromiseHook;
 pub use isolate::PromiseHookType;
 pub use isolate::PromiseRejectCallback;
+// kun: a refused access check's report.
+pub use isolate::AccessType;
+pub use isolate::FailedAccessCheckCallback;
 pub use isolate::RealIsolate;
 pub use isolate::TimeZoneDetection;
 pub use isolate::UseCounterCallback;

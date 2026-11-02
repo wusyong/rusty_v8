@@ -340,6 +340,14 @@ mod get_isolate_impls {
     }
   }
 
+  // kun: an object's callbacks (a refused access check's report, which
+  // has no context) run in its isolate, the thread's current one.
+  impl GetIsolate for Local<'_, Object> {
+    fn get_isolate_ptr(&self) -> *mut RealIsolate {
+      unsafe { raw::v8__Isolate__GetCurrent() }
+    }
+  }
+
   impl GetIsolate for Local<'_, Message> {
     fn get_isolate_ptr(&self) -> *mut RealIsolate {
       unsafe { raw::v8__Isolate__GetCurrent() }

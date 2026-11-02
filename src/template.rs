@@ -168,6 +168,31 @@ unsafe extern "C" {
     flags: PropertyHandlerFlags,
   );
 
+  // kun: `ObjectTemplate::set_access_check_callback_and_handler`.
+  fn v8__ObjectTemplate__SetAccessCheckCallbackAndHandler(
+    this: *const ObjectTemplate,
+    callback: AccessCheckCallback,
+    named_getter: Option<NamedPropertyGetterCallback>,
+    named_setter: Option<NamedPropertySetterCallback>,
+    named_query: Option<NamedPropertyQueryCallback>,
+    named_deleter: Option<NamedPropertyDeleterCallback>,
+    named_enumerator: Option<NamedPropertyEnumeratorCallback>,
+    named_definer: Option<NamedPropertyDefinerCallback>,
+    named_descriptor: Option<NamedPropertyDescriptorCallback>,
+    named_data_or_null: *const Value,
+    named_flags: PropertyHandlerFlags,
+    indexed_getter: Option<IndexedPropertyGetterCallback>,
+    indexed_setter: Option<IndexedPropertySetterCallback>,
+    indexed_query: Option<IndexedPropertyQueryCallback>,
+    indexed_deleter: Option<IndexedPropertyDeleterCallback>,
+    indexed_enumerator: Option<IndexedPropertyEnumeratorCallback>,
+    indexed_definer: Option<IndexedPropertyDefinerCallback>,
+    indexed_descriptor: Option<IndexedPropertyDescriptorCallback>,
+    indexed_data_or_null: *const Value,
+    indexed_flags: PropertyHandlerFlags,
+    data_or_null: *const Value,
+  );
+
   fn v8__ObjectTemplate__SetImmutableProto(this: *const ObjectTemplate);
   // kun: `ObjectTemplate::MarkAsUndetectable`.
   fn v8__ObjectTemplate__MarkAsUndetectable(this: *const ObjectTemplate);
@@ -328,6 +353,14 @@ impl<'s> AccessorConfiguration<'s> {
     self
   }
 }
+
+/// kun: V8's `AccessCheckCallback`: whether the accessing context may
+/// reach the object (`ObjectTemplate::set_access_check_callback_and_handler`).
+pub type AccessCheckCallback = unsafe extern "C" fn(
+  accessing_context: Local<Context>,
+  accessed_object: Local<Object>,
+  data: Local<Value>,
+) -> bool;
 
 #[derive(Default)]
 pub struct NamedPropertyHandlerConfiguration<'s> {
@@ -1073,6 +1106,45 @@ impl ObjectTemplate {
         configuration.descriptor,
         configuration.data.map_or_else(null, |p| &*p),
         configuration.flags,
+      );
+    }
+  }
+
+  /// kun: V8's `ObjectTemplate::SetAccessCheckCallbackAndHandler`: an
+  /// access from a context whose security token isn't this object's
+  /// context's asks `callback` (the accessing context, the object, `data`);
+  /// refused, its properties go through `named` and `indexed` instead
+  /// (HTML's cross-origin objects: Blink's `V8Window` and `V8Location`).
+  pub fn set_access_check_callback_and_handler(
+    &self,
+    callback: AccessCheckCallback,
+    named: NamedPropertyHandlerConfiguration,
+    indexed: IndexedPropertyHandlerConfiguration,
+    data: Option<Local<Value>>,
+  ) {
+    unsafe {
+      v8__ObjectTemplate__SetAccessCheckCallbackAndHandler(
+        self,
+        callback,
+        named.getter,
+        named.setter,
+        named.query,
+        named.deleter,
+        named.enumerator,
+        named.definer,
+        named.descriptor,
+        named.data.map_or_else(null, |p| &*p),
+        named.flags,
+        indexed.getter,
+        indexed.setter,
+        indexed.query,
+        indexed.deleter,
+        indexed.enumerator,
+        indexed.definer,
+        indexed.descriptor,
+        indexed.data.map_or_else(null, |p| &*p),
+        indexed.flags,
+        data.map_or_else(null, |p| &*p),
       );
     }
   }
