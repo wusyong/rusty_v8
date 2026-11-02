@@ -95,6 +95,13 @@ releasing; the files are kept as the run's artifacts.
 
 Code changes are marked with `kun:` comments.
 
+- **`Context::detach_global`** (`src/context.rs`, `src/binding.cc`,
+  2026-11-02): V8's `Context::DetachGlobal`, for kun's window proxy that
+  outlives a navigation (HTML's `WindowProxy`, Blink's `LocalWindowProxy`):
+  the realm before is detached from its global proxy, and the new one is
+  made with it (`ContextOptions::global_object`, upstream's). It changes
+  the glue: kun links a V8 built from this checkout (`RUSTY_V8_ARCHIVE`)
+  until a release has it.
 - **Callback info read inline** (`src/function.rs`, 2026-10-27): a
   function callback's isolate, receiver, argument count, arguments and
   return value slot are read from V8's `FunctionCallbackInfo` slots

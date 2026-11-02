@@ -2311,6 +2311,13 @@ void v8__Context__SetSecurityToken(v8::Context& self, const v8::Value* token) {
   c->SetSecurityToken(ptr_to_local(token));
 }
 
+// kun: a window proxy that outlives a navigation (Blink's
+// `LocalWindowProxy::DisposeContext` detaches the global proxy from the
+// old context, and the new context is made with it).
+void v8__Context__DetachGlobal(v8::Context& self) {
+  ptr_to_local(&self)->DetachGlobal();
+}
+
 void v8__Context__UseDefaultSecurityToken(v8::Context& self) {
   ptr_to_local(&self)->UseDefaultSecurityToken();
 }
