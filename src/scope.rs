@@ -563,6 +563,16 @@ impl<'s> PinnedRef<'s, HandleScope<'_>> {
     unsafe { Local::from_raw_unchecked(context_ptr) }
   }
 
+  /// kun: The incumbent context (V8's `Isolate::GetIncumbentContext`): the
+  /// realm of the most recent script (or callback) on the stack, HTML's
+  /// incumbent realm.
+  pub fn get_incumbent_context(&self) -> Local<'_, Context> {
+    let context_ptr = unsafe {
+      raw::v8__Isolate__GetIncumbentContext(self.0.isolate.as_ptr())
+    };
+    unsafe { Local::from_raw_unchecked(context_ptr) }
+  }
+
   /// Return data that was previously attached to the isolate snapshot via
   /// SnapshotCreator, and removes the reference to it. If called again with
   /// same `index` argument, this function returns `DataError::NoData`.

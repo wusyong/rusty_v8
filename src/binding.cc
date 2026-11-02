@@ -249,6 +249,12 @@ const v8::Context* v8__Isolate__GetEnteredOrMicrotaskContext(
   return local_to_ptr(isolate->GetEnteredOrMicrotaskContext());
 }
 
+// kun: the incumbent realm (HTML's), Blink's `IncumbentDOMWindow`: a
+// message's `source` and origin.
+const v8::Context* v8__Isolate__GetIncumbentContext(v8::Isolate* isolate) {
+  return local_to_ptr(isolate->GetIncumbentContext());
+}
+
 uint32_t v8__Isolate__GetNumberOfDataSlots(v8::Isolate* isolate) {
   return isolate->GetNumberOfDataSlots();
 }

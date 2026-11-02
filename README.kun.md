@@ -102,6 +102,11 @@ Code changes are marked with `kun:` comments.
   made with it (`ContextOptions::global_object`, upstream's). It changes
   the glue: kun links a V8 built from this checkout (`RUSTY_V8_ARCHIVE`)
   until a release has it.
+- **`get_incumbent_context`** (`src/scope.rs`, `src/scope/raw.rs`,
+  `src/binding.cc`, 2026-11-02): V8's `Isolate::GetIncumbentContext`, the
+  realm of the most recent script on the stack (HTML's incumbent realm),
+  which a message's `source` and origin are (Blink's
+  `IncumbentDOMWindow`). It changes the glue too.
 - **Callback info read inline** (`src/function.rs`, 2026-10-27): a
   function callback's isolate, receiver, argument count, arguments and
   return value slot are read from V8's `FunctionCallbackInfo` slots
