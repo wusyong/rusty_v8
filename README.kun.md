@@ -19,7 +19,7 @@ library:
 - **Tools the prebuilt can't give**: TSan, cppgc's marking verifier and
   debug builds with `DCHECK`s, for the GC code kun's `dom` crate builds on.
 - **The V8 sandbox**, and patches of our own: the GC changes below, which
-  kun's `crates/dom/soundness.md` relies on (its last section lists them
+  kun's `crates/bindings/soundness.md` relies on (its last section lists them
   as candidates to send upstream).
 
 Building from source alone doesn't need a fork (`V8_FROM_SOURCE=1` with the
@@ -254,7 +254,7 @@ Code changes are marked with `kun:` comments.
   has the same code. Rust only: the prebuilt library doesn't change. kun's
   `bindings` test `isolate_teardown` drops an isolate whose context has a
   slot under `--stress-compaction`; it crashes without this.
-  Not reported upstream yet; kun's `crates/dom/soundness.md` lists it with
+  Not reported upstream yet; kun's `crates/bindings/soundness.md` lists it with
   the other candidates.
 - **A `ValueSerializer` delegate that refused by throwing isn't asked
   again** (`src/binding.cc`,
@@ -274,7 +274,7 @@ Code changes are marked with `kun:` comments.
   counterpart, `GetWasmModuleTransferId`, returns `Nothing` for `None` and
   never had this. Upstream's `v152.2.0` has the same code. C++: the
   prebuilt library changes, so this needs a new release. Not reported
-  upstream yet; kun's `crates/dom/soundness.md` lists it with the other
+  upstream yet; kun's `crates/bindings/soundness.md` lists it with the other
   candidates.
 - **No warnings under kun's Rust 1.99** (kun builds this crate with its own
   toolchain; this repo's `rust-toolchain.toml` still pins upstream's
@@ -569,7 +569,7 @@ Source").
 5. In kun: rebuild from source (`python3 scripts/ci.py v8`, linked with
    `RUSTY_V8_ARCHIVE`), then `cargo test --workspace` and
    `python scripts/test.py matrix`, and recheck the assumptions in
-   `crates/dom/soundness.md` (its "需要人工審查的地方" covers a `v8`
+   `crates/bindings/soundness.md` (its "需要人工審查的地方" covers a `v8`
    upgrade).
 5. Release it (see "Releases", with `n` back to 1) and point kun at the new
    tag.
