@@ -22,13 +22,20 @@
 //!   reset the reference ([`RootsHandler`]).
 //! - **Workers.** The embedder heap's parallel work runs on V8's platform
 //!   ([`post_job`]), sharing its workers, as cppgc's does.
+//! - **Heap snapshots.** The embedder adds its objects to a heap snapshot
+//!   as V8's public `EmbedderGraph` has them, each object's node merged
+//!   with its wrapper's ([`BuildEmbedderGraph`],
+//!   [`add_build_embedder_graph_callback`]): cppgc's graph builder leaves
+//!   kun's objects out.
 //!
 //! Callbacks from C++ abort the process on a panic: it can't unwind there.
 //!
 //! Only with pointer compression: the patch tells kun's objects from
 //! cppgc's by their entries' tags in the `CppHeapPointerTable`.
 
-use std::ffi::c_void;
+use std::cell::Cell;
+use std::ffi::{CStr, c_char, c_void};
+use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::{self, NonNull};
 
@@ -38,7 +45,7 @@ use crate::scope::GetIsolate;
 use crate::support::Opaque;
 use crate::{
   Data, Isolate, Local, Object, PinScope, Platform, TracedReference,
-  UnsafeRawIsolatePtr,
+  UnsafeRawIsolatePtr, Value,
 };
 
 /// The first of the tags of wrappers holding an embedder heap's object
@@ -138,6 +145,41 @@ unsafe extern "C" {
   fn v8__kun__RootsHandler__DELETE(
     isolate: *mut RealIsolate,
     handler: *mut c_void,
+  );
+  fn v8__HeapProfiler__AddBuildEmbedderGraphCallback(
+    isolate: *mut RealIsolate,
+    callback: BuildEmbedderGraphFn,
+    data: *mut c_void,
+  );
+  fn v8__HeapProfiler__RemoveBuildEmbedderGraphCallback(
+    isolate: *mut RealIsolate,
+    callback: BuildEmbedderGraphFn,
+    data: *mut c_void,
+  );
+  fn v8__EmbedderGraph__AddNode(
+    graph: *mut RawEmbedderGraph,
+    name: *const c_char,
+    name_len: usize,
+    size: usize,
+    address: *const c_void,
+    detachedness: u8,
+    wrapper: *mut RawGraphNode,
+    is_root: bool,
+  ) -> *mut RawGraphNode;
+  fn v8__EmbedderGraph__V8Node(
+    graph: *mut RawEmbedderGraph,
+    value: *const Value,
+  ) -> *mut RawGraphNode;
+  fn v8__EmbedderGraph__AddEdge(
+    graph: *mut RawEmbedderGraph,
+    from: *mut RawGraphNode,
+    to: *mut RawGraphNode,
+    name: *const c_char,
+    weak: bool,
+  );
+  fn v8__EmbedderGraph__AddNativeSize(
+    graph: *mut RawEmbedderGraph,
+    size: usize,
   );
 }
 
@@ -933,4 +975,245 @@ pub unsafe fn post_job(
     v8__kun__Platform__PostJob(platform, user_blocking, data, &raw const fns)
   };
   JobHandle(NonNull::new(handle).expect("V8 posts the job"))
+}
+
+// --- Heap snapshots ----------------------------------------------------------
+
+/// `v8::HeapProfiler::BuildEmbedderGraphCallback`.
+type BuildEmbedderGraphFn =
+  unsafe extern "C" fn(*mut RealIsolate, *mut RawEmbedderGraph, *mut c_void);
+
+/// V8's `EmbedderGraph`.
+#[repr(C)]
+struct RawEmbedderGraph(Opaque);
+
+/// V8's `EmbedderGraph::Node`.
+#[repr(C)]
+struct RawGraphNode(Opaque);
+
+/// What builds the embedder's part of a heap snapshot (V8's
+/// `BuildEmbedderGraphCallback`, Blink's `V8EmbedderGraphBuilder`): called
+/// on the isolate's thread as V8 takes a snapshot, after its GC, while no
+/// GC may run (it must start none: allocate nothing in V8's heap).
+pub trait BuildEmbedderGraph: 'static {
+  fn build(&self, isolate: &mut Isolate, graph: &mut EmbedderGraph<'_>);
+}
+
+/// A heap snapshot's graph of the embedder's objects and V8's values they
+/// refer to (V8's `EmbedderGraph`), during the build: its nodes are valid
+/// as long as it is, and `'g`, invariant and each build's own, keeps them
+/// to it.
+pub struct EmbedderGraph<'g> {
+  raw: NonNull<RawEmbedderGraph>,
+  _brand: PhantomData<Cell<&'g ()>>,
+}
+
+/// A node of an [`EmbedderGraph`]: an embedder's object, or one of V8's
+/// values.
+#[derive(Clone, Copy)]
+pub struct GraphNode<'g> {
+  raw: NonNull<RawGraphNode>,
+  _brand: PhantomData<Cell<&'g ()>>,
+}
+
+/// Whether an object is part of the page (`EmbedderGraph::Node::
+/// Detachedness`): DevTools' Memory panel marks the detached ones.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Detachedness {
+  #[default]
+  Unknown = 0,
+  Attached = 1,
+  Detached = 2,
+}
+
+/// An embedder's object, as a node of the graph holds it: V8 asks a node
+/// these after the build returns, so they are copied in.
+pub struct EmbedderNode<'a, 'g> {
+  /// The snapshot's name for it (its class's).
+  pub name: &'a str,
+  /// Its own bytes.
+  pub size: usize,
+  /// Where it is, if it stays there: the same object keeps its snapshot
+  /// id across snapshots (`GetAddress`).
+  pub address: Option<NonNull<c_void>>,
+  pub detachedness: Detachedness,
+  /// Its wrapper's node (a [`EmbedderGraph::v8_node`]): the snapshot shows
+  /// the two as one, named after this node (`WrapperNode`).
+  pub wrapper: Option<GraphNode<'g>>,
+  /// A root of the snapshot's graph (`IsRootNode`): shown as synthetic,
+  /// what it refers to reachable from the snapshot's roots.
+  pub is_root: bool,
+}
+
+impl<'g> EmbedderGraph<'g> {
+  /// Adds an embedder's object (`AddNode`).
+  pub fn add_node(&mut self, node: EmbedderNode<'_, 'g>) -> GraphNode<'g> {
+    let wrapper = node
+      .wrapper
+      .map_or(ptr::null_mut(), |wrapper| wrapper.raw.as_ptr());
+    let address = node
+      .address
+      .map_or(ptr::null(), |address| address.as_ptr().cast_const());
+    // SAFETY: the graph, during its build; the glue copies the name; the
+    // wrapper is a node of this graph (its brand).
+    let raw = unsafe {
+      v8__EmbedderGraph__AddNode(
+        self.raw.as_ptr(),
+        node.name.as_ptr().cast(),
+        node.name.len(),
+        node.size,
+        address,
+        node.detachedness as u8,
+        wrapper,
+        node.is_root,
+      )
+    };
+    self.node(raw)
+  }
+
+  /// The node of one of V8's values (`V8Node`): its entry in the snapshot.
+  /// A Smi has none, so edges to or from it are left out.
+  pub fn v8_node(&mut self, value: Local<'_, Value>) -> GraphNode<'g> {
+    // SAFETY: the graph, during its build; a live handle (V8's node holds
+    // the value itself, which no GC moves before the snapshot is done).
+    let raw = unsafe { v8__EmbedderGraph__V8Node(self.raw.as_ptr(), &*value) };
+    self.node(raw)
+  }
+
+  /// A strong reference from `from` to `to` (`AddEdge`), named, or else
+  /// numbered. V8 reads the name once the build is over, hence `'static`.
+  pub fn add_edge(
+    &mut self,
+    from: GraphNode<'g>,
+    to: GraphNode<'g>,
+    name: Option<&'static CStr>,
+  ) {
+    self.edge(from, to, name, false);
+  }
+
+  /// A weak one (`AddWeakEdge`): it keeps nothing alive.
+  pub fn add_weak_edge(
+    &mut self,
+    from: GraphNode<'g>,
+    to: GraphNode<'g>,
+    name: Option<&'static CStr>,
+  ) {
+    self.edge(from, to, name, true);
+  }
+
+  /// Bytes the graph holds with no node of their own (`AddNativeSize`).
+  pub fn add_native_size(&mut self, size: usize) {
+    // SAFETY: the graph, during its build.
+    unsafe { v8__EmbedderGraph__AddNativeSize(self.raw.as_ptr(), size) };
+  }
+
+  fn edge(
+    &mut self,
+    from: GraphNode<'g>,
+    to: GraphNode<'g>,
+    name: Option<&'static CStr>,
+    weak: bool,
+  ) {
+    let name = name.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: the graph, during its build; both nodes are its (their
+    // brand); the name outlives it.
+    unsafe {
+      v8__EmbedderGraph__AddEdge(
+        self.raw.as_ptr(),
+        from.raw.as_ptr(),
+        to.raw.as_ptr(),
+        name,
+        weak,
+      );
+    }
+  }
+
+  fn node(&self, raw: *mut RawGraphNode) -> GraphNode<'g> {
+    GraphNode {
+      raw: NonNull::new(raw).expect("V8 adds the node"),
+      _brand: PhantomData,
+    }
+  }
+}
+
+/// A builder added to an isolate's heap profiler
+/// ([`add_build_embedder_graph_callback`]): removed and dropped when
+/// dropped.
+pub struct EmbedderGraphRegistration {
+  isolate: *mut RealIsolate,
+  callback: BuildEmbedderGraphFn,
+  builder: *mut c_void,
+  drop_builder: unsafe fn(*mut c_void),
+}
+
+/// Adds `builder` to the isolate's heap profiler: each heap snapshot from
+/// now on calls it.
+///
+/// # Safety
+///
+/// The registration is dropped on the isolate's thread, before the isolate
+/// is.
+pub unsafe fn add_build_embedder_graph_callback<B: BuildEmbedderGraph>(
+  isolate: &mut Isolate,
+  builder: Box<B>,
+) -> EmbedderGraphRegistration {
+  unsafe extern "C" fn build<B: BuildEmbedderGraph>(
+    isolate: *mut RealIsolate,
+    graph: *mut RawEmbedderGraph,
+    data: *mut c_void,
+  ) {
+    from_cxx(|| {
+      // SAFETY: V8 calls on the isolate's thread, the one it passes.
+      let mut isolate = unsafe { Isolate::from_raw_ptr(isolate) };
+      // The graph V8 builds, alive for the call; a fresh brand.
+      let mut graph = EmbedderGraph {
+        raw: NonNull::new(graph).expect("V8 passes its graph"),
+        _brand: PhantomData,
+      };
+      // SAFETY: the registration's builder, alive while it is registered.
+      let builder = unsafe { &*data.cast::<B>() };
+      builder.build(&mut isolate, &mut graph);
+    });
+  }
+  /// Drops the `Box<B>` at `builder`.
+  unsafe fn drop_box<B>(builder: *mut c_void) {
+    // SAFETY: as the caller promises: `Box::into_raw` of a `Box<B>`,
+    // dropped once.
+    drop(unsafe { Box::from_raw(builder.cast::<B>()) });
+  }
+  let builder = Box::into_raw(builder).cast::<c_void>();
+  let callback: BuildEmbedderGraphFn = build::<B>;
+  // SAFETY: the isolate, on its thread; `builder` lives until the callback
+  // is removed.
+  unsafe {
+    v8__HeapProfiler__AddBuildEmbedderGraphCallback(
+      isolate.as_real_ptr(),
+      callback,
+      builder,
+    );
+  }
+  EmbedderGraphRegistration {
+    isolate: isolate.as_real_ptr(),
+    callback,
+    builder,
+    drop_builder: drop_box::<B>,
+  }
+}
+
+impl Drop for EmbedderGraphRegistration {
+  fn drop(&mut self) {
+    // SAFETY: on the isolate's thread, before it goes (as
+    // `add_build_embedder_graph_callback`'s caller promised): V8 calls the
+    // builder only there, while it takes a snapshot, so none runs; removed,
+    // then dropped.
+    unsafe {
+      v8__HeapProfiler__RemoveBuildEmbedderGraphCallback(
+        self.isolate,
+        self.callback,
+        self.builder,
+      );
+      (self.drop_builder)(self.builder);
+    }
+  }
 }

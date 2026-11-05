@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <string>  // kun: an embedder graph node's name
 #include <thread>
 #include <vector>
 
@@ -6122,6 +6123,90 @@ bool v8__kun__TracedReference__ResetIfSame(
   if (*slot != *handle) return false;
   slot->Reset();
   return true;
+}
+
+}  // extern "C"
+
+// kun: the embedder's objects in a heap snapshot (v8::EmbedderGraph), as
+// Blink's V8EmbedderGraphBuilder adds its DOM's: a node is plain data the
+// embedder gives as it adds it, so V8's questions about it (asked after
+// the callback returns, while the graph lives) need no call back into Rust.
+namespace {
+
+class RustEmbedderGraphNode final : public v8::EmbedderGraph::Node {
+ public:
+  RustEmbedderGraphNode(const char* name, size_t name_len, size_t size,
+                        const void* address, Detachedness detachedness,
+                        Node* wrapper, bool is_root)
+      : name_(name, name_len),
+        size_(size),
+        address_(address),
+        detachedness_(detachedness),
+        wrapper_(wrapper),
+        is_root_(is_root) {}
+
+  const char* Name() override { return name_.c_str(); }
+  size_t SizeInBytes() override { return size_; }
+  Node* WrapperNode() override { return wrapper_; }
+  bool IsRootNode() override { return is_root_; }
+  Detachedness GetDetachedness() override { return detachedness_; }
+  const void* GetAddress() override { return address_; }
+
+ private:
+  std::string name_;
+  size_t size_;
+  const void* address_;
+  Detachedness detachedness_;
+  Node* wrapper_;
+  bool is_root_;
+};
+
+}  // namespace
+
+extern "C" {
+
+void v8__HeapProfiler__AddBuildEmbedderGraphCallback(
+    v8::Isolate* isolate, v8::HeapProfiler::BuildEmbedderGraphCallback callback,
+    void* data) {
+  isolate->GetHeapProfiler()->AddBuildEmbedderGraphCallback(callback, data);
+}
+
+void v8__HeapProfiler__RemoveBuildEmbedderGraphCallback(
+    v8::Isolate* isolate, v8::HeapProfiler::BuildEmbedderGraphCallback callback,
+    void* data) {
+  isolate->GetHeapProfiler()->RemoveBuildEmbedderGraphCallback(callback, data);
+}
+
+v8::EmbedderGraph::Node* v8__EmbedderGraph__AddNode(
+    v8::EmbedderGraph* graph, const char* name, size_t name_len, size_t size,
+    const void* address, uint8_t detachedness,
+    v8::EmbedderGraph::Node* wrapper, bool is_root) {
+  return graph->AddNode(std::make_unique<RustEmbedderGraphNode>(
+      name, name_len, size, address,
+      static_cast<v8::EmbedderGraph::Node::Detachedness>(detachedness),
+      wrapper, is_root));
+}
+
+v8::EmbedderGraph::Node* v8__EmbedderGraph__V8Node(v8::EmbedderGraph* graph,
+                                                   const v8::Value* value) {
+  return graph->V8Node(ptr_to_local(value));
+}
+
+// `name` is read after the callback returns: it lives as long as the
+// process (Rust's `&'static CStr`).
+void v8__EmbedderGraph__AddEdge(v8::EmbedderGraph* graph,
+                                v8::EmbedderGraph::Node* from,
+                                v8::EmbedderGraph::Node* to, const char* name,
+                                bool weak) {
+  if (weak) {
+    graph->AddWeakEdge(from, to, name);
+  } else {
+    graph->AddEdge(from, to, name);
+  }
+}
+
+void v8__EmbedderGraph__AddNativeSize(v8::EmbedderGraph* graph, size_t size) {
+  graph->AddNativeSize(size);
 }
 
 }  // extern "C"

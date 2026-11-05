@@ -514,6 +514,24 @@ Code changes are marked with `kun:` comments.
   constants (`src/kun.rs`) against `include/v8-internal.h`; debug builds
   also call the glue's and assert both agree, at every unwrap kun's tests
   make.
+- **The embedder's objects in heap snapshots** (`src/kun.rs`,
+  `src/binding.cc`; 2026-11-05): V8's public `EmbedderGraph`, unbound
+  upstream: `v8::kun::add_build_embedder_graph_callback`
+  (`HeapProfiler::AddBuildEmbedderGraphCallback`, removed with
+  `RemoveBuildEmbedderGraphCallback` when its registration drops; a
+  `BuildEmbedderGraph` trait), and `EmbedderGraph`'s `add_node`
+  (`AddNode` of the glue's `RustEmbedderGraphNode`, a plain data node:
+  its name, size, address, `Detachedness`, wrapper node and whether it is
+  a root are copied in as it is added, so V8's questions after the
+  callback need no call into Rust), `v8_node` (`V8Node`), `add_edge` and
+  `add_weak_edge` (`AddEdge`, `AddWeakEdge`; a name is a `&'static CStr`,
+  which V8 reads after the callback) and `add_native_size`. Nodes are
+  branded with the build's invariant lifetime, so they can't outlive the
+  graph nor mix with another's. The callback aborts on a panic. As Blink's
+  `V8EmbedderGraphBuilder`: kun's `bindings` adds the `gc` heap's objects
+  with it, which cppgc's graph builder leaves out (the V8 fork's patch).
+  C++: the prebuilt library changes. kun's `bindings` test
+  `heap_snapshot` checks the nodes, edges, wrapper merge and detachedness.
 - **`.github/workflows/kun-release.yml`**: builds and publishes kun's
   prebuilt V8 (see "Releases").
 - **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks
