@@ -177,60 +177,15 @@ Code changes are marked with `kun:` comments.
   constructed" release store, so a concurrent marker could read them
   without synchronizing. kun's `bindings` build script checks that this is
   still in place.
-- **GC slots sound under concurrent marking** (`src/cppgc/slot.rs`):
-  `v8::cppgc::{MemberSlot, WeakMemberSlot, TracedSlot}`, next to upstream's
-  `Member`, `WeakMember` and `TracedReference`, which are unchanged. The
-  slots are aligned to their size and write through `&self` with raw
-  pointers, so tracing them from a marker thread while the heap's thread
-  writes them is not a Rust aliasing violation. kun's `dom` uses only
-  these (its `clippy.toml` disallows upstream's types).
-- **Test-only GC control** (`src/cppgc/testing.rs`, C++ in
-  `src/binding.cc`): `v8::cppgc::testing` wraps cppgc's
-  `StandaloneTestingHeap`, step-by-step marking on a `DetachedHeap`, a heap
-  that can't be attached to an isolate.
-- **Standalone cppgc heap** (`src/cppgc/standalone.rs`, `src/cppgc.rs`, C++
-  in `src/binding.cc`; experimental, for wasm scripts with no isolate):
-  `v8::cppgc::standalone::StandaloneHeap` is a `cppgc::Heap`, not a
-  `v8::CppHeap`, for running with no isolate. It schedules its own GCs and
-  posts them as non-nestable foreground tasks to a `PlatformImpl` (the
-  callbacks `CustomPlatform` uses, with a null isolate), and never scans
-  the stack (`kNoConservativeStackScan`). Objects go on any heap's
-  `AllocationHandle` with `make_garbage_collected_on`
-  (`cppgc__make_garbage_collectable_on`; upstream's
-  `make_garbage_collected` shares its Rust code but still calls its own C
-  function). Dropping the heap runs a precise GC before destroying it
-  (2026-10-06): `cppgc::Heap`'s destructor finishes a running GC but
-  finalizes none of the objects left, so without it every live object's
-  finalizer (a Rust `Drop`) was skipped. `is_marking` and `marking_step`
-  (2026-10-06; `cppgc__StandaloneHeap__MarkingStep`, which includes
-  cppgc's internal `heap.h`) let the embedder post a GC's marking steps
-  after the first: cppgc's `IncrementalMarkingTask` never clears its
-  handle after it ran, so `MarkerBase::ScheduleIncrementalMarkingTask`
-  never posts another, and a GC whose first step doesn't finish marking
-  waits for allocation to reach the atomic GC's limit. A step does what
-  that task does, and finalizes with the config the heap started the GC
-  with (`Heap::FinalizeIncrementalGarbageCollectionIfRunning`; the task's
-  `FinalizeIncrementalGarbageCollectionIfNeeded` is protected). Upstream
-  V8 has the same code; a `CppHeap` doesn't notice, since V8's
-  `IncrementalMarkingJob` drives its marking. kun's `bindings` build
-  script checks the cppgc code this relies on.
-- **wasm GC objects and a weak table** (`src/cppgc/wasm_gc.rs`, C++ in
-  `src/binding.cc`; only with pointer compression; experimental, for wasm
-  GC on cppgc): `WasmGcObject` is a C++ GC object with a type
-  index, a length and its fields, which it traces by a type table the
-  embedder sets (`set_types`). A reference field is a 32-bit `Member` to a
-  wasm object, to a `RustObj` (a host object such as a DOM node), or an
-  i31-or-wasm-object, the reason the objects are 16-aligned. Each `Member`
-  names its target's class: cppgc's mixin path (the trace found from the
-  object's header) only works for mixin classes. `WasmMemberSlot` and
-  `WeakObjectTableSlot` are such `Member`s as fields of Rust GC objects.
-  `WeakObjectTable` holds the objects a wasm Store allocated or was
-  handed: weakly (a weak callback prunes them) while the Store isn't
-  running, strongly while it is, with a Steele barrier when the Store
-  starts running after the table was traced in the same GC and a Dijkstra
-  barrier for objects added while it runs. cppgc's young generation must
-  stay off (it is compiled in, off at run time): its barrier records slots
-  to read back as pointers, and an i31-or-object field may hold an i31.
+- **A traced reference sound under concurrent marking** (`src/cppgc/slot.rs`):
+  `v8::cppgc::TracedSlot`, next to upstream's `TracedReference`, which is
+  unchanged. It is aligned to its size and writes through `&self` with raw
+  pointers, so tracing it from a marker thread while the heap's thread
+  writes it is not a Rust aliasing violation. kun's `bindings` keeps a JS
+  value's edge from its `gc` heap in one (2026-11-06: the `MemberSlot`,
+  `WeakMemberSlot` and `WeakPersistentSlot` beside it, the standalone heap,
+  test-only GC control, wasm GC objects and the heap statistics went with
+  the DOM that used them).
 - **`Object::is_wrapping`** (`src/object.rs`, `src/binding.cc`): whether
   an API wrapper wraps anything, whatever the tag (V8's
   `kAnyCppHeapPointer` range). `unwrap` only sees objects wrapped with the
@@ -366,23 +321,6 @@ Code changes are marked with `kun:` comments.
   before now (signed, for times in the future), and taken from Perfetto's
   now. Checked against Chrome for Testing 152's trace of the same calls;
   no arguments on the events (Chrome's carry `startTime`, `callTime`).
-- **cppgc's reads in Rust** (`src/cppgc/slot.rs`, `src/cppgc.rs`,
-  `src/binding.cc`, `src/binding.hpp`; 2026-10-16): `MemberSlot` and
-  `WeakMemberSlot` decompress their pointer in Rust (sign-extended,
-  shifted by `cppgc__POINTER_COMPRESSION_SHIFT`, masked with the cage base
-  `cppgc__CageBase()` gives once), and `Persistent` and `WeakPersistent`
-  read `PersistentBase`'s raw pointer themselves, instead of a call into C++
-  for each read: C++ inlines both (`Member::Get`, `Persistent::Get`), and in
-  kun these calls were about a tenth of a DOM-heavy page's time. A debug
-  build checks every such read against C++'s. Writes (the write barrier),
-  and making and dropping a `Persistent` (its node holds its address), stay
-  calls.
-
-- **`UnsafePtr::from_value`** (`src/cppgc.rs`; 2026-10-17): the object a
-  `&T` read from the heap is the value of, computed back from its address
-  (`RustObjConcrete` is `#[repr(C)]`; the inverse of `as_ref`), so kun can
-  root a node it reached through an edge without looking it up in a table.
-
 - **`FunctionTemplate::set_accept_any_receiver`** (`src/template.rs`,
   `src/binding.cc`; 2026-10-21): V8's `SetAcceptAnyReceiver`, unbound
   upstream. kun's member functions set it to false, as Blink's
@@ -408,20 +346,6 @@ Code changes are marked with `kun:` comments.
   `SetIsJSApiWrapperNativeErrorCallback`, unbound upstream. V8 asks it
   whether an API wrapper is a native error (`Error.isError`); kun answers
   true for a `DOMException`'s wrapper, as Blink's `V8Initializer` does.
-- **`WeakPersistentSlot`** (`src/cppgc/slot.rs`, `src/cppgc.rs`,
-  `src/binding.cc`, `src/binding.hpp`; 2026-10-22): a `WeakPersistent`
-  built in memory the caller owns (`cppgc__WeakPersistent__CONSTRUCT_IN_PLACE`,
-  `DESTRUCT_IN_PLACE`) instead of one C++ `new` each, which upstream's
-  `WeakPersistent` is because the persistent region's node records the
-  persistent's address and a Rust move doesn't tell C++. An empty one has
-  no node, so `empty` makes it by value; `set` and `clear` take
-  `Pin<&Self>`, so once set it stays put until dropped, and `index` pins an
-  element of a pinned slice. Its size comes from the build
-  (`cppgc__WeakPersistent_SIZE`): with cppgc's object names, on by default
-  on desktop builds, it keeps a `SourceLocation` (32 bytes on x64). kun
-  keeps the id table's weak persistents in chunks of these; on Windows the
-  `new` and `delete` were most of the NT heap's time in Speedometer.
-
 - **What kun's DevTools needs from the inspector** (`src/inspector.rs`,
   `src/exception.rs`, `src/binding.cc`; 2026-10-23):
   `V8InspectorClientImpl::current_time_ms` (`V8InspectorClient::currentTimeMS`,
@@ -448,25 +372,6 @@ Code changes are marked with `kun:` comments.
   included). Upstream binds only `createStackTrace`, from a `v8::StackTrace`,
   which has no async chain. C++: the prebuilt library changes. kun's
   `bindings` test `stack_traces` checks the frames and the `await` parent.
-- **A heap's sizes** (`src/cppgc.rs`, `src/cppgc/standalone.rs`,
-  `src/binding.cc`; 2026-10-24): `Heap::collect_statistics` and
-  `StandaloneHeap::collect_statistics`, cppgc's `CollectStatistics` at
-  `DetailLevel::kBrief` (committed, resident, used and pooled bytes),
-  unbound upstream. Only the brief level: the detailed one finishes
-  sweeping first, which would change the GC kun measures. The public
-  `cppgc::Heap` has no `CollectStatistics`, so the standalone heap's goes
-  through cppgc's internal `heap.h`, as `MarkingStep` does. C++: the
-  prebuilt library changes. kun's `dom` measures its GC with it.
-- **A standalone heap's GC count** (`src/cppgc/standalone.rs`,
-  `src/binding.cc`; 2026-10-25): `StandaloneHeap::gc_count`, the GCs whose
-  marking completed, counted by a `StatsCollector::AllocationObserver`
-  (cppgc's internal `stats-collector.h`) the heap's platform holds,
-  registered as the heap is created and unregistered before it is
-  destroyed. cppgc runs most of a standalone heap's GCs inside its own
-  tasks (an atomic one whole), where the embedder doesn't see them, and
-  the public `HeapState` tells only whether one is marking or sweeping.
-  Unbound upstream. C++: the prebuilt library changes. kun's `dom` records
-  when its heap collected with it.
 - **kun's own V8** (`.gitmodules`, the `v8` submodule; 2026-10-28): the
   submodule points at kun's V8 fork (https://github.com/wusyong/v8, branch
   `kun`), started from `c4ca1ecc`, the commit upstream's `v152.2.0` pins on
