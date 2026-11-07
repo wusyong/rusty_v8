@@ -390,6 +390,9 @@ Code changes are marked with `kun:` comments.
   `CppHeap`), `wrap`/`unwrap` with the tags `0x4000..=0x4fff` (the
   embedder's object's address, not a cppgc object's), `clone_object` (a
   wrapper from a boilerplate one, V8's `Object::Clone`),
+  `function_template_with_cache` (a getter V8 reads from a private
+  property of its holder once there is one, `FunctionTemplate::NewWithCache`,
+  as Blink's `[CachedAccessor]`; 2026-11-07),
   `TracedSlot::set_droppable` and a `RootsHandler` that resets the slot of
   a wrapper V8's scavenge dropped (`TryResetRoot` on V8's threads in
   parallel, as Blink's `BlinkRootsHandler`, else `ResetRoot`), `TracedMarker` (the embedder heap's

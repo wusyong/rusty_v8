@@ -42,9 +42,11 @@ use std::ptr::{self, NonNull};
 use crate::cppgc::{Heap, TracedSlot};
 use crate::isolate::RealIsolate;
 use crate::scope::GetIsolate;
+use crate::support::MapFnTo;
 use crate::support::Opaque;
 use crate::{
-  Data, Isolate, Local, Object, PinScope, Platform, TracedReference,
+  Data, FunctionCallback, FunctionTemplate, Isolate, Local, Object, PinScope,
+  Platform, Private, SideEffectType, Signature, TracedReference,
   UnsafeRawIsolatePtr, Value,
 };
 
@@ -102,6 +104,14 @@ unsafe extern "C" {
     isolate: *mut RealIsolate,
     object: *const Object,
   ) -> *const Object;
+  fn v8__kun__FunctionTemplate__NewWithCache(
+    isolate: *mut RealIsolate,
+    callback: FunctionCallback,
+    cache: *const Private,
+    signature_or_null: *const Signature,
+    length: i32,
+    side_effect_type: SideEffectType,
+  ) -> *const FunctionTemplate;
   fn v8__kun__Unwrap(
     isolate: *mut RealIsolate,
     wrapper: *const Object,
@@ -655,6 +665,37 @@ pub fn clone_object<'s>(
       .cast_local(|sd| v8__kun__Object__Clone(sd.get_isolate_ptr(), &*object))
   }
   .expect("V8 copies an object")
+}
+
+/// A getter's function template whose result V8 reads from `cache`, a
+/// private property of the object the accessor is found on, once it has
+/// one (`FunctionTemplate::NewWithCache`, as Blink's `[CachedAccessor]`):
+/// V8's inline caches and optimizing compilers load the property as data,
+/// calling `callback` only while there is none. The embedder sets the
+/// property, and sets it again when the value changes.
+pub fn function_template_with_cache<'s>(
+  scope: &PinScope<'s, '_, ()>,
+  callback: impl MapFnTo<FunctionCallback>,
+  cache: Local<Private>,
+  signature: Option<Local<Signature>>,
+  length: i32,
+  side_effect_type: SideEffectType,
+) -> Local<'s, FunctionTemplate> {
+  // SAFETY: the isolate, on its thread, and handles of it; the template is
+  // a handle V8 makes in `scope`'s handle scope.
+  unsafe {
+    scope.cast_local(|sd| {
+      v8__kun__FunctionTemplate__NewWithCache(
+        sd.get_isolate_ptr(),
+        callback.map_fn_to(),
+        &*cache,
+        signature.map_or(ptr::null(), |signature| &*signature),
+        length,
+        side_effect_type,
+      )
+    })
+  }
+  .expect("V8 makes a function template")
 }
 
 impl TracedSlot<Object> {

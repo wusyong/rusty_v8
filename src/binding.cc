@@ -5325,6 +5325,17 @@ const v8::Object* v8__kun__Object__Clone(v8::Isolate* isolate,
   return local_to_ptr(ptr_to_local(object)->Clone(isolate));
 }
 
+// kun: a getter whose result V8 reads from a private property of its
+// holder once there is one (Blink's [CachedAccessor]; src/kun.rs).
+const v8::FunctionTemplate* v8__kun__FunctionTemplate__NewWithCache(
+    v8::Isolate* isolate, v8::FunctionCallback callback,
+    const v8::Private* cache, const v8::Signature* signature_or_null,
+    int length, v8::SideEffectType side_effect_type) {
+  return local_to_ptr(v8::FunctionTemplate::NewWithCache(
+      isolate, callback, ptr_to_local(cache), v8::Local<v8::Value>(),
+      ptr_to_local(signature_or_null), length, side_effect_type));
+}
+
 void* v8__kun__Unwrap(v8::Isolate* isolate, const v8::Object* wrapper,
                       uint16_t tag) {
   return v8::kun::Unwrap(isolate, ptr_to_local(wrapper), tag);
