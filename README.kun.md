@@ -422,6 +422,18 @@ Code changes are marked with `kun:` comments.
   constants (`src/kun.rs`) against `include/v8-internal.h`; debug builds
   also call the glue's and assert both agree, at every unwrap kun's tests
   make.
+  `unwrap_receiver` (2026-11-08, `unsafe`) is the same read past the map:
+  for a call's receiver that the callback's `Signature` checked, an object
+  of a `FunctionTemplate`'s or a global proxy whose global is one (V8's
+  `IsCompatibleReceiver`), a `JSAPIObjectWithEmbedderSlots` or a
+  `JSSpecialObject` whose handle follows the header alike, so its map
+  needn't be read again (V8's header's `Object::Unwrap` doesn't read it
+  either). The
+  handle, the entry and its tag are read as `unwrap`'s; debug builds check
+  it against the glue's. Only without V8's sandbox (not built with the
+  `v8_enable_sandbox` feature): with it, an object's fields are no witness
+  to what it is. The instance type check was some
+  28% of a `nodeType` call's callback in kun's samples.
 - **The embedder's objects in heap snapshots** (`src/kun.rs`,
   `src/binding.cc`; 2026-11-05): V8's public `EmbedderGraph`, unbound
   upstream: `v8::kun::add_build_embedder_graph_callback`

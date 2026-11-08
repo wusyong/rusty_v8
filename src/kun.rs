@@ -485,8 +485,8 @@ pub fn unwrap(
 /// `wrapper`'s object if it is an API wrapper, read as V8's header reads
 /// it (`Internals::CanHaveInternalField`, `internal::ReadCppHeapPointerField`):
 /// its map's instance type checked, then its `CppHeapPointerHandle`, the
-/// isolate's table's entry, the entry's tag. `None` for another object
-/// (`Some(None)` for an API wrapper of no object of `tag`'s).
+/// isolate's table's entry, the entry's tag (`object_of`). `None` for
+/// another object (`Some(None)` for an API wrapper of no object of `tag`'s).
 ///
 /// # Safety
 ///
@@ -498,14 +498,11 @@ unsafe fn unwrap_inline(
   tag: u16,
 ) -> Option<Option<NonNull<c_void>>> {
   // SAFETY: a handle's location holds its heap object's tagged address,
-  // whose map (compressed, in its cage) holds its instance type; an API
-  // wrapper's handle field follows its header, and the isolate's table
-  // holds its entry, read atomically as V8 does.
-  let entry = unsafe {
+  // whose map (compressed, in its cage) holds its instance type.
+  unsafe {
     let object = *(&*wrapper as *const Object).cast::<usize>();
-    let field = |offset: usize| object - HEAP_OBJECT_TAG + offset;
     let map = (object & !(CAGE_ALIGNMENT - 1))
-      + (field(0) as *const u32).read() as usize;
+      + ((object - HEAP_OBJECT_TAG) as *const u32).read() as usize;
     let instance_type =
       ((map - HEAP_OBJECT_TAG + MAP_INSTANCE_TYPE_OFFSET) as *const u16).read();
     if instance_type != JS_SPECIAL_API_OBJECT_TYPE
@@ -514,7 +511,29 @@ unsafe fn unwrap_inline(
     {
       return None;
     }
-    let handle = (field(JS_OBJECT_HEADER_SIZE) as *const u32).read();
+    Some(object_of(isolate, object, tag))
+  }
+}
+
+/// The object of `tag`'s the API wrapper at tagged address `object` holds:
+/// its `CppHeapPointerHandle` (after its header), the isolate's table's
+/// entry for it, the entry's tag compared.
+///
+/// # Safety
+///
+/// `isolate` is the wrapper's, on its thread, and `object` is an API
+/// wrapper's address (one of the instance types `unwrap_inline` checks).
+#[inline(always)]
+unsafe fn object_of(
+  isolate: &Isolate,
+  object: usize,
+  tag: u16,
+) -> Option<NonNull<c_void>> {
+  // SAFETY: an API wrapper's handle field follows its header, and the
+  // isolate's table holds its entry, read atomically as V8 does.
+  let entry = unsafe {
+    let handle =
+      ((object - HEAP_OBJECT_TAG + JS_OBJECT_HEADER_SIZE) as *const u32).read();
     let table = *(isolate.as_real_ptr() as *const u8)
       .add(CPP_HEAP_POINTER_TABLE_OFFSET)
       .cast::<*const std::sync::atomic::AtomicUsize>();
@@ -525,11 +544,44 @@ unsafe fn unwrap_inline(
   // null handle's entry, all zeros, fails it.
   let actual = u32::from(entry as u16);
   let first = u32::from(tag) << TAG_SHIFT;
-  Some(if actual == first || actual == first + 1 {
+  if actual == first || actual == first + 1 {
     NonNull::new((entry >> PAYLOAD_SHIFT) as *mut c_void)
   } else {
     None
-  })
+  }
+}
+
+/// kun: [`unwrap`] of a call's receiver that V8's signature checked: an
+/// object of a `FunctionTemplate`'s, or a global proxy whose global is one
+/// (V8's `IsCompatibleReceiver`), so a `JSAPIObjectWithEmbedderSlots` or a
+/// `JSSpecialObject`, whose handle follows the header alike: its map isn't
+/// read again (V8's header's `Object::Unwrap` doesn't read it either). Its
+/// handle, the table's entry and the entry's tag are, as [`unwrap`]'s: a
+/// wrapper wrapping nothing yet, or another tag's object, gives `None`.
+/// Debug builds check it against the glue's.
+///
+/// # Safety
+///
+/// `wrapper` is a receiver that a callback's `Signature` checked (or an
+/// interceptor's holder, an object of its template's), in a V8 without its
+/// sandbox (with it, an object's fields are no witness to what it is:
+/// there is no such function then, so its callers don't build).
+#[cfg(not(feature = "v8_enable_sandbox"))]
+#[inline(always)]
+pub unsafe fn unwrap_receiver(
+  isolate: &mut Isolate,
+  wrapper: Local<Object>,
+  tag: u16,
+) -> Option<NonNull<c_void>> {
+  // SAFETY: the isolate, on its thread, and its handle of an API wrapper,
+  // as the caller promises.
+  let object = unsafe {
+    object_of(isolate, *(&*wrapper as *const Object).cast::<usize>(), tag)
+  };
+  debug_assert_eq!(object, unsafe {
+    NonNull::new(v8__kun__Unwrap(isolate.as_real_ptr(), &*wrapper, tag))
+  });
+  object
 }
 
 /// kun: where the isolate keeps its `CppHeapPointerTable`'s base
