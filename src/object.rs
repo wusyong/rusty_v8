@@ -905,7 +905,7 @@ impl Object {
     unsafe { v8__Object__IsApiWrapper(self) }
   }
 
-  /// kun: whether `wrapper` wraps a C++ object, whatever its tag (`unwrap`
+  /// machopo: whether `wrapper` wraps a C++ object, whatever its tag (`unwrap`
   /// only sees objects wrapped with the tag it is given). False for an
   /// object that isn't an API wrapper, which can't wrap anything.
   #[inline(always)]

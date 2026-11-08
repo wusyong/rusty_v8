@@ -204,7 +204,7 @@ struct const_memory_span_t {
 class RustObj;
 
 // Writes the Rust side of a new RustObj (its value and `dynamic` pointer).
-// kun: called from the constructor, so the Rust data is written before
+// machopo: called from the constructor, so the Rust data is written before
 // cppgc marks the object fully constructed (a release store, after the
 // constructor returns). Concurrent markers trace an object only after
 // reading that bit with acquire, so they see the Rust data without any

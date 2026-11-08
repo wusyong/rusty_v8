@@ -14,5 +14,5 @@ third_party/catapult
 third_party/llvm-build
 third_party/rust-toolchain
 
-# kun: bindings the build script copies or downloads here.
+# machopo: bindings the build script copies or downloads here.
 /gen/*.rs

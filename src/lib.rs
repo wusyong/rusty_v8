@@ -87,8 +87,8 @@ mod wasm;
 pub mod crdtp;
 pub mod inspector;
 pub mod json;
-pub mod kun; // kun: an embedder heap marking with V8's major GCs
-pub mod kun_trace; // kun: a Perfetto trace of the process
+pub mod machopo; // machopo: an embedder heap marking with V8's major GCs
+pub mod machopo_trace; // machopo: a Perfetto trace of the process
 pub mod script_compiler;
 pub mod simdutf;
 // This module is intentionally named "V8" rather than "v8" to match the
@@ -120,7 +120,7 @@ pub use isolate::HostImportModuleWithPhaseDynamicallyCallback;
 pub use isolate::HostInitializeImportMetaObjectCallback;
 pub use isolate::IntoSharedError;
 pub use isolate::IntoSharedErrorKind;
-// kun: the callback type of `Isolate::set_is_js_api_wrapper_native_error_callback`.
+// machopo: the callback type of `Isolate::set_is_js_api_wrapper_native_error_callback`.
 pub use isolate::IsJsApiWrapperNativeErrorCallback;
 pub use isolate::Isolate;
 pub use isolate::IsolateHandle;
@@ -138,7 +138,7 @@ pub use isolate::OwnedIsolate;
 pub use isolate::PromiseHook;
 pub use isolate::PromiseHookType;
 pub use isolate::PromiseRejectCallback;
-// kun: a refused access check's report.
+// machopo: a refused access check's report.
 pub use isolate::AccessType;
 pub use isolate::FailedAccessCheckCallback;
 pub use isolate::RealIsolate;

@@ -1,7 +1,7 @@
-//! kun: an embedder heap of kun's own (not cppgc's) marking with V8's major
-//! GCs as cppgc's does in Chrome's unified heap, through kun's patch to V8
-//! (`v8/include/v8-kun.h`, in kun's V8 fork) and the glue's C functions for
-//! it (`src/binding.cc`). Thin: the embedder's heap and its rules are kun's
+//! machopo: an embedder heap of machopo's own (not cppgc's) marking with V8's major
+//! GCs as cppgc's does in Chrome's unified heap, through machopo's patch to V8
+//! (`v8/include/v8-machopo.h`, in machopo's V8 fork) and the glue's C functions for
+//! it (`src/binding.cc`). Thin: the embedder's heap and its rules are machopo's
 //! `bindings`'; this module only gives V8's side Rust types.
 //!
 //! - **Marking.** V8 starts the embedder heap's marking with its own,
@@ -26,11 +26,11 @@
 //!   as V8's public `EmbedderGraph` has them, each object's node merged
 //!   with its wrapper's ([`BuildEmbedderGraph`],
 //!   [`add_build_embedder_graph_callback`]): cppgc's graph builder leaves
-//!   kun's objects out.
+//!   machopo's objects out.
 //!
 //! Callbacks from C++ abort the process on a panic: it can't unwind there.
 //!
-//! Only with pointer compression: the patch tells kun's objects from
+//! Only with pointer compression: the patch tells machopo's objects from
 //! cppgc's by their entries' tags in the `CppHeapPointerTable`.
 
 use std::cell::Cell;
@@ -51,12 +51,12 @@ use crate::{
 };
 
 /// The first of the tags of wrappers holding an embedder heap's object
-/// (`v8::kun::kFirstTag`).
+/// (`v8::machopo::kFirstTag`).
 pub const FIRST_TAG: u16 = 0x4000;
-/// The last of them (`v8::kun::kLastTag`).
+/// The last of them (`v8::machopo::kLastTag`).
 pub const LAST_TAG: u16 = 0x4fff;
 
-/// `v8::kun::EmbedderMarking`'s methods, which the glue's
+/// `v8::machopo::EmbedderMarking`'s methods, which the glue's
 /// `RustEmbedderMarking` calls with its data (`RustEmbedderMarking::Fns`;
 /// copied as it is made).
 #[repr(C)]
@@ -86,25 +86,25 @@ type TryResetRootFn =
   unsafe extern "C" fn(*mut c_void, *mut c_void, *const RootHandle) -> bool;
 
 unsafe extern "C" {
-  fn v8__kun__EmbedderMarking__NEW(
+  fn v8__machopo__EmbedderMarking__NEW(
     data: *mut c_void,
     fns: *const MarkingFns,
   ) -> *mut c_void;
-  fn v8__kun__EmbedderMarking__DELETE(marking: *mut c_void);
-  fn v8__kun__FinishMarking(isolate: *mut RealIsolate);
-  fn v8__kun__SetEmbedderMarking(heap: *const Heap, marking: *mut c_void);
-  fn v8__kun__ReportEmbedderUsedSize(isolate: *mut RealIsolate, used: usize);
-  fn v8__kun__Wrap(
+  fn v8__machopo__EmbedderMarking__DELETE(marking: *mut c_void);
+  fn v8__machopo__FinishMarking(isolate: *mut RealIsolate);
+  fn v8__machopo__SetEmbedderMarking(heap: *const Heap, marking: *mut c_void);
+  fn v8__machopo__ReportEmbedderUsedSize(isolate: *mut RealIsolate, used: usize);
+  fn v8__machopo__Wrap(
     isolate: *mut RealIsolate,
     wrapper: *const Object,
     object: *mut c_void,
     tag: u16,
   );
-  fn v8__kun__Object__Clone(
+  fn v8__machopo__Object__Clone(
     isolate: *mut RealIsolate,
     object: *const Object,
   ) -> *const Object;
-  fn v8__kun__FunctionTemplate__NewWithCache(
+  fn v8__machopo__FunctionTemplate__NewWithCache(
     isolate: *mut RealIsolate,
     callback: FunctionCallback,
     cache: *const Private,
@@ -112,47 +112,47 @@ unsafe extern "C" {
     length: i32,
     side_effect_type: SideEffectType,
   ) -> *const FunctionTemplate;
-  fn v8__kun__Unwrap(
+  fn v8__machopo__Unwrap(
     isolate: *mut RealIsolate,
     wrapper: *const Object,
     tag: u16,
   ) -> *mut c_void;
-  fn v8__kun__TracedReference__SetDroppable(
+  fn v8__machopo__TracedReference__SetDroppable(
     isolate: *mut RealIsolate,
     slot: *mut TracedReference<Data>,
     value: *const Object,
   );
-  fn v8__kun__TracedReference__ResetIfSame(
+  fn v8__machopo__TracedReference__ResetIfSame(
     slot: *mut TracedReference<Data>,
     handle: *const RootHandle,
   ) -> bool;
-  fn v8__kun__TracedMarker__NEW(isolate: *mut RealIsolate) -> *mut c_void;
-  fn v8__kun__TracedMarker__DELETE(marker: *mut c_void);
-  fn v8__kun__TracedMarker__Mark(
+  fn v8__machopo__TracedMarker__NEW(isolate: *mut RealIsolate) -> *mut c_void;
+  fn v8__machopo__TracedMarker__DELETE(marker: *mut c_void);
+  fn v8__machopo__TracedMarker__Mark(
     marker: *mut c_void,
     reference: *const TracedReference<Data>,
   );
-  fn v8__kun__TracedMarker__Publish(marker: *mut c_void);
-  fn v8__kun__Platform__PostJob(
+  fn v8__machopo__TracedMarker__Publish(marker: *mut c_void);
+  fn v8__machopo__Platform__PostJob(
     platform: *const Platform,
     user_blocking: bool,
     data: *mut c_void,
     fns: *const JobFns,
   ) -> *mut c_void;
-  fn v8__kun__JobHandle__NotifyConcurrencyIncrease(handle: *mut c_void);
-  fn v8__kun__JobHandle__Cancel(handle: *mut c_void);
-  fn v8__kun__JobHandle__CancelAndDetach(handle: *mut c_void);
-  fn v8__kun__JobDelegate__ShouldYield(delegate: *mut JobDelegate) -> bool;
-  fn v8__kun__JobDelegate__NotifyConcurrencyIncrease(
+  fn v8__machopo__JobHandle__NotifyConcurrencyIncrease(handle: *mut c_void);
+  fn v8__machopo__JobHandle__Cancel(handle: *mut c_void);
+  fn v8__machopo__JobHandle__CancelAndDetach(handle: *mut c_void);
+  fn v8__machopo__JobDelegate__ShouldYield(delegate: *mut JobDelegate) -> bool;
+  fn v8__machopo__JobDelegate__NotifyConcurrencyIncrease(
     delegate: *mut JobDelegate,
   );
-  fn v8__kun__RootsHandler__NEW(
+  fn v8__machopo__RootsHandler__NEW(
     isolate: *mut RealIsolate,
     data: *mut c_void,
     reset_root: ResetRootFn,
     try_reset_root: TryResetRootFn,
   ) -> *mut c_void;
-  fn v8__kun__RootsHandler__DELETE(
+  fn v8__machopo__RootsHandler__DELETE(
     isolate: *mut RealIsolate,
     handler: *mut c_void,
   );
@@ -200,7 +200,7 @@ fn from_cxx<R>(f: impl FnOnce() -> R) -> R {
 
 // --- Marking -----------------------------------------------------------------
 
-/// The embedder heap's side of V8's major GCs (`v8::kun::EmbedderMarking`).
+/// The embedder heap's side of V8's major GCs (`v8::machopo::EmbedderMarking`).
 /// V8 calls `start`, `advance`, `is_done` and `end` on the isolate's
 /// thread; the locals' functions on its marking threads, each local on one
 /// thread at a time (the marking state holding it).
@@ -293,8 +293,8 @@ pub unsafe fn set_embedder_marking<M: EmbedderMarking>(
   // glue's object is detached and deleted; the glue copies `fns`; the
   // isolate's own `CppHeap`, on its thread.
   let glue = unsafe {
-    let glue = v8__kun__EmbedderMarking__NEW(marking.cast(), &raw const fns);
-    v8__kun__SetEmbedderMarking(heap, glue);
+    let glue = v8__machopo__EmbedderMarking__NEW(marking.cast(), &raw const fns);
+    v8__machopo__SetEmbedderMarking(heap, glue);
     glue
   };
   EmbedderMarkingRegistration {
@@ -314,9 +314,9 @@ impl Drop for EmbedderMarkingRegistration {
     // the glue's marking, no V8 thread calls it: it is deleted, and the
     // marking with it (its locals went with V8's marking states).
     unsafe {
-      v8__kun__FinishMarking(self.isolate);
-      v8__kun__SetEmbedderMarking(self.heap, ptr::null_mut());
-      v8__kun__EmbedderMarking__DELETE(self.glue);
+      v8__machopo__FinishMarking(self.isolate);
+      v8__machopo__SetEmbedderMarking(self.heap, ptr::null_mut());
+      v8__machopo__EmbedderMarking__DELETE(self.glue);
       (self.drop_marking)(self.marking);
     }
   }
@@ -426,7 +426,7 @@ unsafe extern "C" fn delete_local<M: EmbedderMarking>(
 /// calling the embedder marking.
 pub fn report_embedder_used_size(isolate: &mut Isolate, used: usize) {
   // SAFETY: the isolate, on its thread.
-  unsafe { v8__kun__ReportEmbedderUsedSize(isolate.as_real_ptr(), used) };
+  unsafe { v8__machopo__ReportEmbedderUsedSize(isolate.as_real_ptr(), used) };
 }
 
 // --- Wrappers ----------------------------------------------------------------
@@ -454,7 +454,7 @@ pub unsafe fn wrap(
   // SAFETY: the isolate, on its thread, and a handle of it; the patch
   // checks the rest.
   unsafe {
-    v8__kun__Wrap(isolate.as_real_ptr(), &*wrapper, object.as_ptr(), tag);
+    v8__machopo__Wrap(isolate.as_real_ptr(), &*wrapper, object.as_ptr(), tag);
   }
 }
 
@@ -466,18 +466,18 @@ pub fn unwrap(
   wrapper: Local<Object>,
   tag: u16,
 ) -> Option<NonNull<c_void>> {
-  // kun: an API wrapper (every wrapper made from a template) read here, as
+  // machopo: an API wrapper (every wrapper made from a template) read here, as
   // V8's header inlines `Object::Unwrap`, not a C++ call: a getter's whole
   // floor is a few of those. Debug builds check it against the glue's.
   let object = match unsafe { unwrap_inline(isolate, wrapper, tag) } {
     Some(object) => object,
     // Another object (V8 checks what it is).
     None => NonNull::new(unsafe {
-      v8__kun__Unwrap(isolate.as_real_ptr(), &*wrapper, tag)
+      v8__machopo__Unwrap(isolate.as_real_ptr(), &*wrapper, tag)
     }),
   };
   debug_assert_eq!(object, unsafe {
-    NonNull::new(v8__kun__Unwrap(isolate.as_real_ptr(), &*wrapper, tag))
+    NonNull::new(v8__machopo__Unwrap(isolate.as_real_ptr(), &*wrapper, tag))
   });
   object
 }
@@ -551,7 +551,7 @@ unsafe fn object_of(
   }
 }
 
-/// kun: [`unwrap`] of a call's receiver that V8's signature checked: an
+/// machopo: [`unwrap`] of a call's receiver that V8's signature checked: an
 /// object of a `FunctionTemplate`'s, or a global proxy whose global is one
 /// (V8's `IsCompatibleReceiver`), so a `JSAPIObjectWithEmbedderSlots` or a
 /// `JSSpecialObject`, whose handle follows the header alike: its map isn't
@@ -579,12 +579,12 @@ pub unsafe fn unwrap_receiver(
     object_of(isolate, *(&*wrapper as *const Object).cast::<usize>(), tag)
   };
   debug_assert_eq!(object, unsafe {
-    NonNull::new(v8__kun__Unwrap(isolate.as_real_ptr(), &*wrapper, tag))
+    NonNull::new(v8__machopo__Unwrap(isolate.as_real_ptr(), &*wrapper, tag))
   });
   object
 }
 
-/// kun: where the isolate keeps its `CppHeapPointerTable`'s base
+/// machopo: where the isolate keeps its `CppHeapPointerTable`'s base
 /// (`Internals::kIsolateCppHeapPointerTableOffset`, `include/v8-internal.h`):
 /// past the embedder data slots (`kNumIsolateDataSlots`, 4), the external
 /// pointer table (`kExternalEntityTableSize`: 4 pointers and 4 `uint32_t`s)
@@ -617,7 +617,7 @@ const LAST_JS_API_OBJECT_TYPE: u16 = 0x80a;
 /// a heap object's address rounded down to it is its cage's base.
 const CAGE_ALIGNMENT: usize = 1 << 32;
 
-/// kun: `string`'s characters if it is a sequential one-byte string, or a
+/// machopo: `string`'s characters if it is a sequential one-byte string, or a
 /// thin one (an internalized string's forward) to one, read in place as
 /// V8's header reads a string's fields (`Internals::kStringResourceOffset`
 /// is the first byte past the header): the map's instance type, the length
@@ -687,7 +687,7 @@ pub unsafe fn one_byte_chars<'s>(
   chars
 }
 
-/// kun: a string's fields (`include/v8-internal.h`, `src/objects/string.h`,
+/// machopo: a string's fields (`include/v8-internal.h`, `src/objects/string.h`,
 /// `src/objects/instance-type.h`): its length after the map and the hash
 /// (pointer compression's 4-byte map), its header's size (a sequential
 /// string's characters, a thin string's forward, follow it), the first
@@ -714,7 +714,7 @@ pub fn clone_object<'s>(
   // handle V8 makes in `scope`'s handle scope.
   unsafe {
     scope
-      .cast_local(|sd| v8__kun__Object__Clone(sd.get_isolate_ptr(), &*object))
+      .cast_local(|sd| v8__machopo__Object__Clone(sd.get_isolate_ptr(), &*object))
   }
   .expect("V8 copies an object")
 }
@@ -737,7 +737,7 @@ pub fn function_template_with_cache<'s>(
   // a handle V8 makes in `scope`'s handle scope.
   unsafe {
     scope.cast_local(|sd| {
-      v8__kun__FunctionTemplate__NewWithCache(
+      v8__machopo__FunctionTemplate__NewWithCache(
         sd.get_isolate_ptr(),
         callback.map_fn_to(),
         &*cache,
@@ -768,7 +768,7 @@ impl TracedSlot<Object> {
   ) {
     // SAFETY: as the caller promises; `value` a handle in `scope`.
     unsafe {
-      v8__kun__TracedReference__SetDroppable(
+      v8__machopo__TracedReference__SetDroppable(
         scope.get_isolate_ptr(),
         self.raw(),
         &*value,
@@ -778,7 +778,7 @@ impl TracedSlot<Object> {
 }
 
 /// A thread's marking of the references in the embedder heap's objects
-/// into V8's worklists (`v8::kun::TracedMarker`, cppgc's
+/// into V8's worklists (`v8::machopo::TracedMarker`, cppgc's
 /// `ConcurrentUnifiedHeapMarkingVisitor`): made while V8 runs a major GC's
 /// marking, on any thread; published when dropped.
 pub struct TracedMarker(*mut c_void);
@@ -795,27 +795,27 @@ impl TracedMarker {
   /// it is done.
   pub unsafe fn new(isolate: UnsafeRawIsolatePtr) -> Self {
     // SAFETY: as the caller promises.
-    Self(unsafe { v8__kun__TracedMarker__NEW(isolate.as_real_ptr()) })
+    Self(unsafe { v8__machopo__TracedMarker__NEW(isolate.as_real_ptr()) })
   }
 
   /// Marks the value `slot` refers to, if any: V8 reads it atomically
   /// (`GetSlotThreadSafe`) as the heap's thread may write it.
   pub fn mark<T>(&mut self, slot: &TracedSlot<T>) {
     // SAFETY: a live marker, in the marking it was made in; a live slot.
-    unsafe { v8__kun__TracedMarker__Mark(self.0, slot.raw()) };
+    unsafe { v8__machopo__TracedMarker__Mark(self.0, slot.raw()) };
   }
 
   /// Publishes what this marker pushed, for V8's other threads.
   pub fn publish(&mut self) {
     // SAFETY: a live marker.
-    unsafe { v8__kun__TracedMarker__Publish(self.0) };
+    unsafe { v8__machopo__TracedMarker__Publish(self.0) };
   }
 }
 
 impl Drop for TracedMarker {
   fn drop(&mut self) {
     // SAFETY: made by `new`, deleted once (publishing its worklist).
-    unsafe { v8__kun__TracedMarker__DELETE(self.0) };
+    unsafe { v8__machopo__TracedMarker__DELETE(self.0) };
   }
 }
 
@@ -835,7 +835,7 @@ impl RootHandle {
   /// the thread free (each thread frees in the blocks it processes).
   pub unsafe fn reset_if_same<T>(&self, slot: &TracedSlot<T>) -> bool {
     // SAFETY: as the caller promises; `self` is V8's, alive for the call.
-    unsafe { v8__kun__TracedReference__ResetIfSame(slot.raw(), self) }
+    unsafe { v8__machopo__TracedReference__ResetIfSame(slot.raw(), self) }
   }
 }
 
@@ -914,7 +914,7 @@ pub unsafe fn set_roots_handler<H: RootsHandler>(
   // SAFETY: the isolate, on its thread; `handler` lives until the glue's
   // object is unset and deleted.
   let glue = unsafe {
-    v8__kun__RootsHandler__NEW(
+    v8__machopo__RootsHandler__NEW(
       isolate.as_real_ptr(),
       handler,
       reset_root::<H>,
@@ -935,7 +935,7 @@ impl Drop for RootsHandlerRegistration {
     // `set_roots_handler`'s caller promised): V8 calls the handler only
     // there, in its scavenges, so none runs; unset, then deleted.
     unsafe {
-      v8__kun__RootsHandler__DELETE(self.isolate, self.glue);
+      v8__machopo__RootsHandler__DELETE(self.isolate, self.glue);
       (self.drop_handler)(self.handler);
     }
   }
@@ -963,14 +963,14 @@ impl JobDelegate {
   /// runs something more urgent.
   pub fn should_yield(&self) -> bool {
     // SAFETY: V8's delegate, during the run.
-    unsafe { v8__kun__JobDelegate__ShouldYield(ptr::from_ref(self).cast_mut()) }
+    unsafe { v8__machopo__JobDelegate__ShouldYield(ptr::from_ref(self).cast_mut()) }
   }
 
   /// `max_concurrency` grew: more workers may help.
   pub fn notify_concurrency_increase(&self) {
     // SAFETY: as above.
     unsafe {
-      v8__kun__JobDelegate__NotifyConcurrencyIncrease(
+      v8__machopo__JobDelegate__NotifyConcurrencyIncrease(
         ptr::from_ref(self).cast_mut(),
       );
     }
@@ -992,7 +992,7 @@ impl JobHandle {
   /// `max_concurrency` grew: more workers may help.
   pub fn notify_concurrency_increase(&self) {
     // SAFETY: a handle not cancelled yet: only its owner cancels it.
-    unsafe { v8__kun__JobHandle__NotifyConcurrencyIncrease(self.0.as_ptr()) };
+    unsafe { v8__machopo__JobHandle__NotifyConcurrencyIncrease(self.0.as_ptr()) };
   }
 
   /// Stops the job: its runs see `should_yield`, no new one starts, and
@@ -1007,14 +1007,14 @@ impl JobHandle {
     let handle = self.0;
     std::mem::forget(self);
     // SAFETY: the handle, deleted once (forgotten above).
-    unsafe { v8__kun__JobHandle__CancelAndDetach(handle.as_ptr()) };
+    unsafe { v8__machopo__JobHandle__CancelAndDetach(handle.as_ptr()) };
   }
 }
 
 impl Drop for JobHandle {
   fn drop(&mut self) {
     // SAFETY: the handle, deleted once.
-    unsafe { v8__kun__JobHandle__Cancel(self.0.as_ptr()) };
+    unsafe { v8__machopo__JobHandle__Cancel(self.0.as_ptr()) };
   }
 }
 
@@ -1065,7 +1065,7 @@ pub unsafe fn post_job(
   // SAFETY: the platform outlives the job, as the caller promises; `data`
   // is owned by the task from here on; the glue copies `fns`.
   let handle = unsafe {
-    v8__kun__Platform__PostJob(platform, user_blocking, data, &raw const fns)
+    v8__machopo__Platform__PostJob(platform, user_blocking, data, &raw const fns)
   };
   JobHandle(NonNull::new(handle).expect("V8 posts the job"))
 }

@@ -28,7 +28,7 @@ unsafe extern "C" {
   ) -> *const Context;
   fn v8__Isolate__GetCurrent() -> *mut RealIsolate;
   fn v8__Context__Global(this: *const Context) -> *const Object;
-  // kun: `Context::detach_global`.
+  // machopo: `Context::detach_global`.
   fn v8__Context__DetachGlobal(this: *const Context);
   fn v8__Context__GetExtrasBindingObject(this: *const Context)
   -> *const Object;
@@ -145,7 +145,7 @@ impl Context {
     unsafe { scope.cast_local(|_| v8__Context__Global(self)) }.unwrap()
   }
 
-  /// kun: Detaches the global proxy from this context (V8's
+  /// machopo: Detaches the global proxy from this context (V8's
   /// `Context::DetachGlobal`): the context's global object is no longer
   /// reachable through it, and a new context can be made with it
   /// (`ContextOptions::global_object`), keeping the proxy's identity (a

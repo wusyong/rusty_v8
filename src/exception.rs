@@ -34,7 +34,7 @@ unsafe extern "C" {
   fn v8__Message__GetEndColumn(this: *const Message) -> int;
   fn v8__Message__IsSharedCrossOrigin(this: *const Message) -> bool;
   fn v8__Message__IsOpaque(this: *const Message) -> bool;
-  // kun: the script's id.
+  // machopo: the script's id.
   fn v8__Message__GetScriptId(this: *const Message) -> int;
   fn v8__Message__GetStackTrace(this: *const Message) -> *const StackTrace;
 
@@ -342,7 +342,7 @@ impl Message {
     unsafe { v8__Message__GetEndColumn(self) as usize }
   }
 
-  // kun: the id of the script this Message is from (`GetScriptOrigin()`'s),
+  // machopo: the id of the script this Message is from (`GetScriptOrigin()`'s),
   // which the inspector's `exception_thrown` takes.
   /// The id of the script this Message is from.
   #[inline(always)]

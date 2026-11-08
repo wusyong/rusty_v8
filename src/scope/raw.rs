@@ -227,7 +227,7 @@ unsafe extern "C" {
   pub(super) fn v8__Isolate__GetEnteredOrMicrotaskContext(
     isolate: *mut RealIsolate,
   ) -> *const Context;
-  // kun: `get_incumbent_context`.
+  // machopo: `get_incumbent_context`.
   pub(super) fn v8__Isolate__GetIncumbentContext(
     isolate: *mut RealIsolate,
   ) -> *const Context;

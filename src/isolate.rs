@@ -171,7 +171,7 @@ pub type PromiseHook =
 
 pub type PromiseRejectCallback = unsafe extern "C" fn(PromiseRejectMessage);
 
-/// kun: V8's `AccessType`, what an access a refused access check reported
+/// machopo: V8's `AccessType`, what an access a refused access check reported
 /// (`Isolate::set_failed_access_check_callback_function`) was.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,7 +183,7 @@ pub enum AccessType {
   Keys,
 }
 
-/// kun: V8's `FailedAccessCheckCallback`: an access an access check
+/// machopo: V8's `FailedAccessCheckCallback`: an access an access check
 /// refused, on the object (`target`) with its check's `data`, which throws
 /// (V8 throws a `TypeError` if it doesn't).
 pub type FailedAccessCheckCallback = unsafe extern "C" fn(
@@ -584,7 +584,7 @@ pub type GcCallbackWithData = unsafe extern "C" fn(
 pub type InterruptCallback =
   unsafe extern "C" fn(isolate: UnsafeRawIsolatePtr, data: *mut c_void);
 
-// kun: V8's `IsJSApiWrapperNativeErrorCallback`, unbound upstream.
+// machopo: V8's `IsJSApiWrapperNativeErrorCallback`, unbound upstream.
 /// Whether `object`, an API wrapper, is a native error, as one with
 /// [[ErrorData]] is: what `Error.isError` gives for it. Blink answers true
 /// for a `DOMException`'s wrapper.
@@ -807,7 +807,7 @@ unsafe extern "C" {
     isolate: *mut RealIsolate,
     callback: PromiseRejectCallback,
   );
-  // kun: `Isolate::set_failed_access_check_callback_function`.
+  // machopo: `Isolate::set_failed_access_check_callback_function`.
   fn v8__Isolate__SetFailedAccessCheckCallbackFunction(
     isolate: *mut RealIsolate,
     callback: FailedAccessCheckCallback,
@@ -820,7 +820,7 @@ unsafe extern "C" {
     isolate: *mut RealIsolate,
     callback: AllowWasmCodeGenerationCallback,
   );
-  // kun: unbound upstream.
+  // machopo: unbound upstream.
   fn v8__Isolate__SetIsJSApiWrapperNativeErrorCallback(
     isolate: *mut RealIsolate,
     callback: IsJsApiWrapperNativeErrorCallback,
@@ -950,7 +950,7 @@ impl UnsafeRawIsolatePtr {
 #[repr(C)]
 pub struct RealIsolate(Opaque);
 
-/// kun: `Internals::kIsolateEmbedderDataOffset` (`include/v8-internal.h`),
+/// machopo: `Internals::kIsolateEmbedderDataOffset` (`include/v8-internal.h`),
 /// where V8's isolate keeps its embedder data slots: summed from that
 /// header's layout constants for 64-bit pointers (the isolate's cage base,
 /// stack guard, flags, builtin tables, allocation infos, fast C call
@@ -1330,7 +1330,7 @@ impl Isolate {
 
   /// Retrieve embedder-specific data from the isolate.
   /// Returns NULL if SetData has never been called for the given `slot`.
-  // kun: inlined, as V8's (a load: `get_data_internal`).
+  // machopo: inlined, as V8's (a load: `get_data_internal`).
   #[inline(always)]
   pub fn get_data(&self, slot: u32) -> *mut c_void {
     self.get_data_internal(Self::INTERNAL_DATA_SLOT_COUNT + slot)
@@ -1352,7 +1352,7 @@ impl Isolate {
 
   #[inline(always)]
   pub(crate) fn get_data_internal(&self, slot: u32) -> *mut c_void {
-    // kun: V8's `Isolate::GetData`, which its header inlines: the slot
+    // machopo: V8's `Isolate::GetData`, which its header inlines: the slot
     // `EMBEDDER_DATA_OFFSET` bytes into the isolate, read here instead of
     // a C++ call (every callback's scope reads the annex through it).
     // Debug builds check it against V8's.
@@ -1697,7 +1697,7 @@ impl Isolate {
     }
   }
 
-  /// kun: V8's `Isolate::SetFailedAccessCheckCallbackFunction`: what an
+  /// machopo: V8's `Isolate::SetFailedAccessCheckCallbackFunction`: what an
   /// access an access check refused and no interceptor took (a delete, a
   /// define, a prototype set) throws, instead of V8's `TypeError` (HTML's
   /// `SecurityError` across origins; Blink's
@@ -1741,7 +1741,7 @@ impl Isolate {
     }
   }
 
-  // kun: unbound upstream.
+  // machopo: unbound upstream.
   /// Sets the callback that says whether an API wrapper is a native error
   /// (`Error.isError`).
   #[inline(always)]
@@ -2168,7 +2168,7 @@ impl Isolate {
     }
   }
 
-  /// kun: [`Self::request_garbage_collection_for_testing`], saying whether
+  /// machopo: [`Self::request_garbage_collection_for_testing`], saying whether
   /// the stack may hold pointers into the heaps. With
   /// [`EmbedderStackState::NoHeapPointers`] the stack isn't scanned, so a
   /// stale pointer left on it can't keep garbage alive; only pass it when
@@ -2440,7 +2440,7 @@ fn current_thread_id() -> usize {
     // This cold path deliberately avoids `std::thread::current()`: it may run
     // from another TLS destructor, where panicking would abort the process.
     // A relaxed global counter is sufficient because IDs are only compared.
-    // kun: `fetch_update` is deprecated in Rust 1.99 (renamed `try_update`,
+    // machopo: `fetch_update` is deprecated in Rust 1.99 (renamed `try_update`,
     // which is still unstable in this crate's pinned 1.91).
     #[allow(deprecated)]
     let id = NEXT_THREAD_ID

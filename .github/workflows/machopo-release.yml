@@ -1,15 +1,15 @@
-# kun: builds the prebuilt V8 kun links (pointer compression on every
-# platform) and attaches it to the GitHub Release of the pushed `kun-v*` tag,
+# machopo: builds the prebuilt V8 machopo links (pointer compression on every
+# platform) and attaches it to the GitHub Release of the pushed `machopo-v*` tag,
 # under the file names build.rs looks up with RUSTY_V8_MIRROR. Separate from
 # upstream's ci.yml so rebasing onto a new upstream tag doesn't conflict.
 # Run it by hand (workflow_dispatch) to try a build without releasing: the
 # files are then kept as workflow artifacts instead.
 
-name: kun-release
+name: machopo-release
 
 on:
   push:
-    tags: ["kun-v*"]
+    tags: ["machopo-v*"]
   workflow_dispatch:
 
 permissions:
@@ -30,7 +30,7 @@ jobs:
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
           --verify-tag --title "$GITHUB_REF_NAME"
-          --notes "Prebuilt V8 for kun, built from $GITHUB_SHA with v8_enable_pointer_compression."
+          --notes "Prebuilt V8 for machopo, built from $GITHUB_SHA with v8_enable_pointer_compression."
 
   build:
     name: ${{ matrix.variant }} ${{ matrix.target }}

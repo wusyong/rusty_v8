@@ -261,7 +261,7 @@ std::vector<uint8_t>* v8_inspector__RemoteObject__toBytes(
   return bytes;
 }
 
-// kun: a stack as the protocol's `Runtime.StackTrace`, in CBOR.
+// machopo: a stack as the protocol's `Runtime.StackTrace`, in CBOR.
 std::vector<uint8_t>* v8_inspector__V8StackTrace__buildInspectorObject(
     const v8_inspector::V8StackTrace& self, int max_async_depth) {
   auto* bytes = crdtp__vec_u8__new();

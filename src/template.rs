@@ -51,7 +51,7 @@ unsafe extern "C" {
     intrinsic: Intrinsic,
     attr: PropertyAttribute,
   );
-  // kun: `Template::SetLazyDataProperty`.
+  // machopo: `Template::SetLazyDataProperty`.
   #[allow(clippy::too_many_arguments)]
   fn v8__Template__SetLazyDataProperty(
     this: *const Template,
@@ -105,7 +105,7 @@ unsafe extern "C" {
   );
   fn v8__FunctionTemplate__ReadOnlyPrototype(this: *const FunctionTemplate);
   fn v8__FunctionTemplate__RemovePrototype(this: *const FunctionTemplate);
-  // kun: `FunctionTemplate::SetAcceptAnyReceiver`.
+  // machopo: `FunctionTemplate::SetAcceptAnyReceiver`.
   fn v8__FunctionTemplate__SetAcceptAnyReceiver(
     this: *const FunctionTemplate,
     value: bool,
@@ -168,7 +168,7 @@ unsafe extern "C" {
     flags: PropertyHandlerFlags,
   );
 
-  // kun: `ObjectTemplate::set_access_check_callback_and_handler`.
+  // machopo: `ObjectTemplate::set_access_check_callback_and_handler`.
   fn v8__ObjectTemplate__SetAccessCheckCallbackAndHandler(
     this: *const ObjectTemplate,
     callback: AccessCheckCallback,
@@ -194,7 +194,7 @@ unsafe extern "C" {
   );
 
   fn v8__ObjectTemplate__SetImmutableProto(this: *const ObjectTemplate);
-  // kun: `ObjectTemplate::MarkAsUndetectable`.
+  // machopo: `ObjectTemplate::MarkAsUndetectable`.
   fn v8__ObjectTemplate__MarkAsUndetectable(this: *const ObjectTemplate);
 
   fn v8__ObjectTemplate__SetCallAsFunctionHandler(
@@ -354,7 +354,7 @@ impl<'s> AccessorConfiguration<'s> {
   }
 }
 
-/// kun: V8's `AccessCheckCallback`: whether the accessing context may
+/// machopo: V8's `AccessCheckCallback`: whether the accessing context may
 /// reach the object (`ObjectTemplate::set_access_check_callback_and_handler`).
 pub type AccessCheckCallback = unsafe extern "C" fn(
   accessing_context: Local<Context>,
@@ -715,7 +715,7 @@ impl Template {
     }
   }
 
-  // kun: so that a global's many properties (an embedder's interface
+  // machopo: so that a global's many properties (an embedder's interface
   // objects) cost nothing until read, as Blink installs them.
   /// Like [`Object::set_lazy_data_property_with_data`], on every instance of
   /// the template: each instance has a native data property that V8
@@ -947,7 +947,7 @@ impl FunctionTemplate {
     unsafe { v8__FunctionTemplate__RemovePrototype(self) };
   }
 
-  // kun: so an embedder's functions can't be called on an object of a
+  // machopo: so an embedder's functions can't be called on an object of a
   // context its own can't access (Blink's `IDLMemberInstaller` sets it for
   // every member that isn't [CrossOrigin]).
   /// Whether a call of the function skips V8's access check of its
@@ -1110,7 +1110,7 @@ impl ObjectTemplate {
     }
   }
 
-  /// kun: V8's `ObjectTemplate::SetAccessCheckCallbackAndHandler`: an
+  /// machopo: V8's `ObjectTemplate::SetAccessCheckCallbackAndHandler`: an
   /// access from a context whose security token isn't this object's
   /// context's asks `callback` (the accessing context, the object, `data`);
   /// refused, its properties go through `named` and `indexed` instead
@@ -1202,7 +1202,7 @@ impl ObjectTemplate {
     unsafe { v8__ObjectTemplate__SetImmutableProto(self) };
   }
 
-  // kun: for HTML's `document.all`, whose [[IsHTMLDDA]] V8 implements as an
+  // machopo: for HTML's `document.all`, whose [[IsHTMLDDA]] V8 implements as an
   // undetectable object (Blink marks `HTMLAllCollection`'s template so).
   /// Makes the instances of this template undetectable: `typeof` is
   /// `"undefined"`, they are `== null` and convert to `false` (ECMAScript's

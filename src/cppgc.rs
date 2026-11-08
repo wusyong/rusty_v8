@@ -15,7 +15,7 @@ use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
-// kun: a traced reference sound under concurrent marking; see the module.
+// machopo: a traced reference sound under concurrent marking; see the module.
 mod slot;
 pub use slot::TracedSlot;
 
@@ -380,7 +380,7 @@ pub unsafe fn make_garbage_collected<T: GarbageCollected + 'static>(
   let additional_bytes =
     std::mem::size_of::<RustObjConcrete<T>>() - std::mem::size_of::<RustObj>();
 
-  // kun: the Rust data is written by `init_rust_obj`, which `RustObj`'s
+  // machopo: the Rust data is written by `init_rust_obj`, which `RustObj`'s
   // constructor calls, so it is published together with the object (see
   // `RustObjInit` in `support.h`). Writing it after allocation returned,
   // as upstream does, comes after cppgc's "fully constructed" release

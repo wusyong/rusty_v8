@@ -7,7 +7,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <string>  // kun: an embedder graph node's name
+#include <string>  // machopo: an embedder graph node's name
 #include <thread>
 #include <vector>
 
@@ -28,7 +28,7 @@
 #include "v8-platform.h"
 #include "v8-profiler.h"
 #include "v8.h"
-#include "v8-kun.h"  // kun: the embedder heap marking with V8
+#include "v8-machopo.h"  // machopo: the embedder heap marking with V8
 #include "v8/src/flags/flags.h"
 #include "v8/src/libplatform/default-platform.h"
 
@@ -242,7 +242,7 @@ const v8::Context* v8__Isolate__GetEnteredOrMicrotaskContext(
   return local_to_ptr(isolate->GetEnteredOrMicrotaskContext());
 }
 
-// kun: the incumbent realm (HTML's), Blink's `IncumbentDOMWindow`: a
+// machopo: the incumbent realm (HTML's), Blink's `IncumbentDOMWindow`: a
 // message's `source` and origin.
 const v8::Context* v8__Isolate__GetIncumbentContext(v8::Isolate* isolate) {
   return local_to_ptr(isolate->GetIncumbentContext());
@@ -309,7 +309,7 @@ void v8__Isolate__SetPromiseRejectCallback(v8::Isolate* isolate,
   isolate->SetPromiseRejectCallback(callback);
 }
 
-// kun: what an access a refused access check reported throws (Blink's
+// machopo: what an access a refused access check reported throws (Blink's
 // `FailedAccessCheckCallbackInMainThread`: a `SecurityError`).
 void v8__Isolate__SetFailedAccessCheckCallbackFunction(
     v8::Isolate* isolate, v8::FailedAccessCheckCallback callback) {
@@ -321,7 +321,7 @@ void v8__Isolate__SetWasmAsyncResolvePromiseCallback(
   isolate->SetWasmAsyncResolvePromiseCallback(callback);
 }
 
-// kun: whether an API wrapper is a native error (`Error.isError`); Blink
+// machopo: whether an API wrapper is a native error (`Error.isError`); Blink
 // answers true for a DOMException's wrapper.
 void v8__Isolate__SetIsJSApiWrapperNativeErrorCallback(
     v8::Isolate* isolate, v8::IsJSApiWrapperNativeErrorCallback callback) {
@@ -477,7 +477,7 @@ void v8__Isolate__RequestGarbageCollectionForTesting(
   isolate->RequestGarbageCollectionForTesting(type);
 }
 
-// kun: the overload that says whether to scan the stack conservatively.
+// machopo: the overload that says whether to scan the stack conservatively.
 void v8__Isolate__RequestGarbageCollectionForTestingWithStackState(
     v8::Isolate* isolate, v8::Isolate::GarbageCollectionType type,
     cppgc::EmbedderStackState stack_state) {
@@ -1507,7 +1507,7 @@ void v8__Template__Set(const v8::Template& self, const v8::Name& key,
   ptr_to_local(&self)->Set(ptr_to_local(&key), ptr_to_local(&value), attr);
 }
 
-// kun: a property each instance of the template has, made with its getter
+// machopo: a property each instance of the template has, made with its getter
 // the first time it is read (Blink installs a global's interface objects
 // so).
 void v8__Template__SetLazyDataProperty(
@@ -1585,7 +1585,7 @@ void v8__ObjectTemplate__SetIndexedPropertyHandler(
       ptr_to_local(data_or_null), flags));
 }
 
-// kun: a cross-origin object's access check, and the interceptors its
+// machopo: a cross-origin object's access check, and the interceptors its
 // properties go through when it refuses (Blink's `V8Window`, `V8Location`).
 void v8__ObjectTemplate__SetAccessCheckCallbackAndHandler(
     const v8::ObjectTemplate& self, v8::AccessCheckCallback callback,
@@ -1632,7 +1632,7 @@ void v8__ObjectTemplate__SetImmutableProto(const v8::ObjectTemplate& self) {
   return ptr_to_local(&self)->SetImmutableProto();
 }
 
-// kun: undetectable instances, for HTML's `document.all` ([[IsHTMLDDA]]).
+// machopo: undetectable instances, for HTML's `document.all` ([[IsHTMLDDA]]).
 void v8__ObjectTemplate__MarkAsUndetectable(const v8::ObjectTemplate& self) {
   ptr_to_local(&self)->MarkAsUndetectable();
 }
@@ -2351,7 +2351,7 @@ void v8__Context__SetSecurityToken(v8::Context& self, const v8::Value* token) {
   c->SetSecurityToken(ptr_to_local(token));
 }
 
-// kun: a window proxy that outlives a navigation (Blink's
+// machopo: a window proxy that outlives a navigation (Blink's
 // `LocalWindowProxy::DisposeContext` detaches the global proxy from the
 // old context, and the new context is made with it).
 void v8__Context__DetachGlobal(v8::Context& self) {
@@ -2512,7 +2512,7 @@ bool v8__Message__IsSharedCrossOrigin(const v8::Message& self) {
 
 bool v8__Message__IsOpaque(const v8::Message& self) { return self.IsOpaque(); }
 
-// kun: the script's id, which the inspector's `exceptionThrown` takes.
+// machopo: the script's id, which the inspector's `exceptionThrown` takes.
 int v8__Message__GetScriptId(const v8::Message& self) {
   return self.GetScriptOrigin().ScriptId();
 }
@@ -2657,7 +2657,7 @@ void v8__FunctionTemplate__RemovePrototype(const v8::FunctionTemplate& self) {
   ptr_to_local(&self)->RemovePrototype();
 }
 
-// kun: whether V8 checks that the receiver may be accessed (Blink sets it
+// machopo: whether V8 checks that the receiver may be accessed (Blink sets it
 // for every member that isn't [CrossOrigin]).
 void v8__FunctionTemplate__SetAcceptAnyReceiver(
     const v8::FunctionTemplate& self, bool value) {
@@ -3582,7 +3582,7 @@ void v8_inspector__V8Inspector__contextCreated(
   self->contextCreated(info);
 }
 
-// kun: `contextCreated` with the context's origin (`V8ContextInfo::origin`),
+// machopo: `contextCreated` with the context's origin (`V8ContextInfo::origin`),
 // which DevTools shows a context by.
 void v8_inspector__V8Inspector__contextCreatedWithOrigin(
     v8_inspector::V8Inspector* self, const v8::Context& context,
@@ -3595,7 +3595,7 @@ void v8_inspector__V8Inspector__contextCreatedWithOrigin(
   self->contextCreated(info);
 }
 
-// kun: every context of the group gone at once, and its console messages
+// machopo: every context of the group gone at once, and its console messages
 // (`Runtime.executionContextsCleared`), as a page's main frame navigates.
 void v8_inspector__V8Inspector__resetContextGroup(
     v8_inspector::V8Inspector* self, int contextGroupId) {
@@ -3659,7 +3659,7 @@ unsigned v8_inspector__V8Inspector__exceptionThrown(
       script_id);
 }
 
-// kun: a promise's rejection handled after it was reported.
+// machopo: a promise's rejection handled after it was reported.
 void v8_inspector__V8Inspector__exceptionRevoked(
     v8_inspector::V8Inspector* self, const v8::Context& context,
     unsigned exception_id, v8_inspector::StringView message) {
@@ -3677,7 +3677,7 @@ void v8_inspector__V8StackTrace__DELETE(v8_inspector::V8StackTrace* self) {
   delete self;
 }
 
-// kun: the stack as script runs, with its async chain, as DevTools' Network
+// machopo: the stack as script runs, with its async chain, as DevTools' Network
 // initiators have it (Blink's `SourceLocation::CaptureStackTraceInternal`).
 // Null outside any context group.
 v8_inspector::V8StackTrace* v8_inspector__V8Inspector__captureStackTrace(
@@ -3685,7 +3685,7 @@ v8_inspector::V8StackTrace* v8_inspector__V8Inspector__captureStackTrace(
   return self->captureStackTrace(full_stack).release();
 }
 
-// kun: whether a captured stack has no frames (no script was running).
+// machopo: whether a captured stack has no frames (no script was running).
 bool v8_inspector__V8StackTrace__isEmpty(
     const v8_inspector::V8StackTrace& self) {
   return self.isEmpty();
@@ -3883,7 +3883,7 @@ v8_inspector::StringBuffer*
 v8_inspector__V8InspectorClient__BASE__resourceNameToUrl(
     v8_inspector::V8InspectorClient* self,
     const v8_inspector::StringView& resource_name_view);
-// kun: the embedder's clock.
+// machopo: the embedder's clock.
 double v8_inspector__V8InspectorClient__BASE__currentTimeMS(
     v8_inspector::V8InspectorClient* self);
 
@@ -3948,7 +3948,7 @@ struct v8_inspector__V8InspectorClient__BASE
             this, resource_name_view);
     return std::unique_ptr<v8_inspector::StringBuffer>(b);
   }
-  // kun: the console's and the protocol's times (`consoleAPICalled`'s
+  // machopo: the console's and the protocol's times (`consoleAPICalled`'s
   // `timestamp`, `console.time`), which are 0 without it.
   double currentTimeMS() override {
     return v8_inspector__V8InspectorClient__BASE__currentTimeMS(this);
@@ -4322,7 +4322,7 @@ struct v8__ValueSerializer__Delegate : public v8::ValueSerializer::Delegate {
     uint32_t result = 0;
     if (!v8__ValueSerializer__Delegate__GetSharedArrayBufferId(
             this, isolate, shared_array_buffer, &result)) {
-      // kun: a delegate that refused by throwing (what Blink's
+      // machopo: a delegate that refused by throwing (what Blink's
       // `V8ScriptValueSerializer` does) has its exception already pending,
       // and forwarding would throw a second one on top of it, which
       // `Isolate::Throw` only tolerates for a termination exception (a
@@ -4837,7 +4837,7 @@ RustObj* v8__Object__Unwrap(v8::Isolate* isolate, const v8::Object& wrapper,
       v8::Object::Unwrap(isolate, ptr_to_local(&wrapper), tag_range));
 }
 
-// kun: `wrapper` is an API wrapper; any tag but the free-entry ones.
+// machopo: `wrapper` is an API wrapper; any tag but the free-entry ones.
 bool v8__Object__IsWrapping(v8::Isolate* isolate, const v8::Object& wrapper) {
   return v8::Object::Unwrap(isolate, ptr_to_local(&wrapper),
                             v8::kAnyCppHeapPointer) != nullptr;
@@ -5234,12 +5234,12 @@ size_t simdutf__binary_to_base64(const char* input, size_t length, char* output,
 
 }  // extern "C"
 
-// kun: the embedder heap marking with V8's major GCs (v8/include/v8-kun.h,
-// in kun's V8 fork), for kun's `bindings`.
+// machopo: the embedder heap marking with V8's major GCs (v8/include/v8-machopo.h,
+// in machopo's V8 fork), for machopo's `bindings`.
 namespace {
 
 // An EmbedderMarking whose methods are Rust functions, called with `data`.
-class RustEmbedderMarking final : public v8::kun::EmbedderMarking {
+class RustEmbedderMarking final : public v8::machopo::EmbedderMarking {
  public:
   struct Fns {
     void (*start)(void* data);
@@ -5285,49 +5285,49 @@ class RustEmbedderMarking final : public v8::kun::EmbedderMarking {
 
 extern "C" {
 
-RustEmbedderMarking* v8__kun__EmbedderMarking__NEW(
+RustEmbedderMarking* v8__machopo__EmbedderMarking__NEW(
     void* data, const RustEmbedderMarking::Fns* fns) {
   return new RustEmbedderMarking(data, fns);
 }
 
-// Deleted once no GC marks (v8__kun__FinishMarking) and the CppHeap no
+// Deleted once no GC marks (v8__machopo__FinishMarking) and the CppHeap no
 // longer has it: no V8 thread calls it any more, and its locals are gone
 // with the marking states that held them.
-void v8__kun__EmbedderMarking__DELETE(RustEmbedderMarking* marking) {
+void v8__machopo__EmbedderMarking__DELETE(RustEmbedderMarking* marking) {
   delete marking;
 }
 
 // Finishes a major GC's marking that runs (Chrome finishes its GC before it
 // detaches a CppHeap from its isolate): afterwards no V8 thread marks, nor
 // calls the embedder marking, until the next GC starts.
-void v8__kun__FinishMarking(v8::Isolate* isolate) {
-  v8::kun::FinishMarking(isolate);
+void v8__machopo__FinishMarking(v8::Isolate* isolate) {
+  v8::machopo::FinishMarking(isolate);
 }
 
-void v8__kun__SetEmbedderMarking(v8::CppHeap* heap,
+void v8__machopo__SetEmbedderMarking(v8::CppHeap* heap,
                                  RustEmbedderMarking* marking) {
-  v8::kun::SetEmbedderMarking(heap, marking);
+  v8::machopo::SetEmbedderMarking(heap, marking);
 }
 
-void v8__kun__ReportEmbedderUsedSize(v8::Isolate* isolate, size_t used) {
-  v8::kun::ReportEmbedderUsedSize(isolate, used);
+void v8__machopo__ReportEmbedderUsedSize(v8::Isolate* isolate, size_t used) {
+  v8::machopo::ReportEmbedderUsedSize(isolate, used);
 }
 
-void v8__kun__Wrap(v8::Isolate* isolate, const v8::Object* wrapper,
+void v8__machopo__Wrap(v8::Isolate* isolate, const v8::Object* wrapper,
                    void* object, uint16_t tag) {
-  v8::kun::Wrap(isolate, ptr_to_local(wrapper), object, tag);
+  v8::machopo::Wrap(isolate, ptr_to_local(wrapper), object, tag);
 }
 
 // A shallow copy of `object` (V8's Object::Clone): a new wrapper from a
 // boilerplate one, as Blink's V8PerContextData::CreateWrapperFromCache.
-const v8::Object* v8__kun__Object__Clone(v8::Isolate* isolate,
+const v8::Object* v8__machopo__Object__Clone(v8::Isolate* isolate,
                                          const v8::Object* object) {
   return local_to_ptr(ptr_to_local(object)->Clone(isolate));
 }
 
-// kun: a getter whose result V8 reads from a private property of its
-// holder once there is one (Blink's [CachedAccessor]; src/kun.rs).
-const v8::FunctionTemplate* v8__kun__FunctionTemplate__NewWithCache(
+// machopo: a getter whose result V8 reads from a private property of its
+// holder once there is one (Blink's [CachedAccessor]; src/machopo.rs).
+const v8::FunctionTemplate* v8__machopo__FunctionTemplate__NewWithCache(
     v8::Isolate* isolate, v8::FunctionCallback callback,
     const v8::Private* cache, const v8::Signature* signature_or_null,
     int length, v8::SideEffectType side_effect_type) {
@@ -5336,41 +5336,41 @@ const v8::FunctionTemplate* v8__kun__FunctionTemplate__NewWithCache(
       ptr_to_local(signature_or_null), length, side_effect_type));
 }
 
-void* v8__kun__Unwrap(v8::Isolate* isolate, const v8::Object* wrapper,
+void* v8__machopo__Unwrap(v8::Isolate* isolate, const v8::Object* wrapper,
                       uint16_t tag) {
-  return v8::kun::Unwrap(isolate, ptr_to_local(wrapper), tag);
+  return v8::machopo::Unwrap(isolate, ptr_to_local(wrapper), tag);
 }
 
 // An embedder heap's object's reference to its wrapper, in the object (8
 // bytes the embedder heap never reads): a droppable TracedReference, as
 // Blink's main world wrapper.
-void v8__kun__TracedReference__SetDroppable(v8::Isolate* isolate,
+void v8__machopo__TracedReference__SetDroppable(v8::Isolate* isolate,
                                             v8::TracedReference<v8::Object>* slot,
                                             const v8::Object* value) {
   slot->Reset(isolate, ptr_to_local(value),
               v8::TracedReference<v8::Object>::IsDroppable{});
 }
 
-v8::kun::TracedMarker* v8__kun__TracedMarker__NEW(v8::Isolate* isolate) {
-  return new v8::kun::TracedMarker(isolate);
+v8::machopo::TracedMarker* v8__machopo__TracedMarker__NEW(v8::Isolate* isolate) {
+  return new v8::machopo::TracedMarker(isolate);
 }
 
-void v8__kun__TracedMarker__DELETE(v8::kun::TracedMarker* marker) {
+void v8__machopo__TracedMarker__DELETE(v8::machopo::TracedMarker* marker) {
   delete marker;
 }
 
-void v8__kun__TracedMarker__Mark(v8::kun::TracedMarker* marker,
+void v8__machopo__TracedMarker__Mark(v8::machopo::TracedMarker* marker,
                                  const v8::TracedReference<v8::Data>* ref) {
   marker->Mark(*ref);
 }
 
-void v8__kun__TracedMarker__Publish(v8::kun::TracedMarker* marker) {
+void v8__machopo__TracedMarker__Publish(v8::machopo::TracedMarker* marker) {
   marker->Publish();
 }
 
 }  // extern "C"
 
-// kun: a parallel job of kun's GC (Rust's `gc::Job`) on V8's platform, so
+// machopo: a parallel job of machopo's GC (Rust's `gc::Job`) on V8's platform, so
 // that the embedder heap's GC shares V8's workers, as cppgc's does.
 namespace {
 
@@ -5402,7 +5402,7 @@ class RustJobTask final : public v8::JobTask {
 
 extern "C" {
 
-v8::JobHandle* v8__kun__Platform__PostJob(v8::Platform* platform,
+v8::JobHandle* v8__machopo__Platform__PostJob(v8::Platform* platform,
                                           bool user_blocking, void* data,
                                           const RustJobTask::Fns* fns) {
   return platform
@@ -5412,34 +5412,34 @@ v8::JobHandle* v8__kun__Platform__PostJob(v8::Platform* platform,
       .release();
 }
 
-void v8__kun__JobHandle__NotifyConcurrencyIncrease(v8::JobHandle* handle) {
+void v8__machopo__JobHandle__NotifyConcurrencyIncrease(v8::JobHandle* handle) {
   handle->NotifyConcurrencyIncrease();
 }
 
-void v8__kun__JobHandle__Cancel(v8::JobHandle* handle) {
+void v8__machopo__JobHandle__Cancel(v8::JobHandle* handle) {
   handle->Cancel();
   delete handle;
 }
 
-void v8__kun__JobHandle__CancelAndDetach(v8::JobHandle* handle) {
+void v8__machopo__JobHandle__CancelAndDetach(v8::JobHandle* handle) {
   handle->CancelAndDetach();
   delete handle;
 }
 
-bool v8__kun__JobDelegate__ShouldYield(v8::JobDelegate* delegate) {
+bool v8__machopo__JobDelegate__ShouldYield(v8::JobDelegate* delegate) {
   return delegate->ShouldYield();
 }
 
-void v8__kun__JobDelegate__NotifyConcurrencyIncrease(
+void v8__machopo__JobDelegate__NotifyConcurrencyIncrease(
     v8::JobDelegate* delegate) {
   delegate->NotifyConcurrencyIncrease();
 }
 
 }  // extern "C"
 
-// kun: V8's scavenge drops an unmodified wrapper whose droppable reference
+// machopo: V8's scavenge drops an unmodified wrapper whose droppable reference
 // an embedder heap's object holds (reclaim_unmodified_wrappers): the
-// embedder finds that object through the wrapper (any of kun's tags) and
+// embedder finds that object through the wrapper (any of machopo's tags) and
 // resets its reference, as Blink's V8EmbedderRootsHandler does.
 namespace {
 
@@ -5459,7 +5459,7 @@ class RustRootsHandler final : public v8::EmbedderRootsHandler {
 
   void ResetRoot(const v8::TracedReference<v8::Value>& handle) override {
     void* object = v8::Object::Unwrap<void>(
-        isolate_, handle.As<v8::Object>(), v8::kun::kTagRange);
+        isolate_, handle.As<v8::Object>(), v8::machopo::kTagRange);
     if (object) reset_root_(data_, object, &handle);
   }
 
@@ -5470,7 +5470,7 @@ class RustRootsHandler final : public v8::EmbedderRootsHandler {
   // wrapper of no object of the tags is left to ResetRoot.
   bool TryResetRoot(const v8::TracedReference<v8::Value>& handle) override {
     void* object = v8::Object::Unwrap<void>(
-        isolate_, handle.As<v8::Object>(), v8::kun::kTagRange);
+        isolate_, handle.As<v8::Object>(), v8::machopo::kTagRange);
     return object && try_reset_root_(data_, object, &handle);
   }
 
@@ -5485,7 +5485,7 @@ class RustRootsHandler final : public v8::EmbedderRootsHandler {
 
 extern "C" {
 
-RustRootsHandler* v8__kun__RootsHandler__NEW(
+RustRootsHandler* v8__machopo__RootsHandler__NEW(
     v8::Isolate* isolate, void* data, RustRootsHandler::ResetRootFn reset_root,
     RustRootsHandler::TryResetRootFn try_reset_root) {
   auto* handler =
@@ -5497,7 +5497,7 @@ RustRootsHandler* v8__kun__RootsHandler__NEW(
 // Unregistered and deleted, on the isolate's thread: V8 calls it only in
 // its scavenges (ResetRoot on that thread, TryResetRoot on its workers,
 // joined before the scavenge ends), so none runs meanwhile.
-void v8__kun__RootsHandler__DELETE(v8::Isolate* isolate,
+void v8__machopo__RootsHandler__DELETE(v8::Isolate* isolate,
                                    RustRootsHandler* handler) {
   isolate->SetEmbedderRootsHandler(nullptr);
   delete handler;
@@ -5505,7 +5505,7 @@ void v8__kun__RootsHandler__DELETE(v8::Isolate* isolate,
 
 // Resets `slot` if it refers to what `handle` does: the reference V8 asks
 // to reset, of the object `ResetRoot` found.
-bool v8__kun__TracedReference__ResetIfSame(
+bool v8__machopo__TracedReference__ResetIfSame(
     v8::TracedReference<v8::Object>* slot,
     const v8::TracedReference<v8::Value>* handle) {
   if (*slot != *handle) return false;
@@ -5515,7 +5515,7 @@ bool v8__kun__TracedReference__ResetIfSame(
 
 }  // extern "C"
 
-// kun: the embedder's objects in a heap snapshot (v8::EmbedderGraph), as
+// machopo: the embedder's objects in a heap snapshot (v8::EmbedderGraph), as
 // Blink's V8EmbedderGraphBuilder adds its DOM's: a node is plain data the
 // embedder gives as it adds it, so V8's questions about it (asked after
 // the callback returns, while the graph lives) need no call back into Rust.

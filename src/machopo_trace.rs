@@ -1,6 +1,6 @@
-//! kun: a Perfetto trace of the process, V8's events and the embedder's
+//! machopo: a Perfetto trace of the process, V8's events and the embedder's
 //! spans in one file, as Chrome's trace has Blink's and V8's (V8 is built
-//! with `v8_use_perfetto`; the C++ is `src/kun_trace.cc`).
+//! with `v8_use_perfetto`; the C++ is `src/machopo_trace.cc`).
 //!
 //! [`start`] before V8's platform is initialized (V8 registers its events
 //! only once Perfetto is up), [`stop`] at the end; [`begin`], [`end`],
@@ -12,17 +12,17 @@ use std::ffi::c_char;
 use std::path::Path;
 
 unsafe extern "C" {
-  fn kun__Trace__Start(
+  fn machopo__Trace__Start(
     path: *const c_char,
     categories: *const *const c_char,
     category_count: usize,
     buffer_kb: u32,
   ) -> bool;
-  fn kun__Trace__Stop();
-  fn kun__Trace__Begin(name: *const c_char, name_len: usize);
-  fn kun__Trace__End();
-  fn kun__Trace__Mark(name: *const c_char, name_len: usize, ago_ns: i64);
-  fn kun__Trace__Measure(
+  fn machopo__Trace__Stop();
+  fn machopo__Trace__Begin(name: *const c_char, name_len: usize);
+  fn machopo__Trace__End();
+  fn machopo__Trace__Mark(name: *const c_char, name_len: usize, ago_ns: i64);
+  fn machopo__Trace__Measure(
     name: *const c_char,
     name_len: usize,
     start_ago_ns: i64,
@@ -31,7 +31,7 @@ unsafe extern "C" {
 }
 
 /// Starts recording into the file at `path` the track events of
-/// `categories` (V8's, such as `v8` and `devtools.timeline`, `kun` for
+/// `categories` (V8's, such as `v8` and `devtools.timeline`, `machopo` for
 /// [`begin`]'s spans and `blink.user_timing` for [`mark`] and [`measure`]), through a ring buffer of `buffer_kb` written out
 /// every second; what overflows it within a second overwrites the oldest of
 /// that second, counted as data loss in the trace's stats. False if the
@@ -53,7 +53,7 @@ pub fn start(path: &Path, categories: &[&str], buffer_kb: u32) -> bool {
     .collect();
   // SAFETY: the strings and the array outlive the call, which copies them.
   unsafe {
-    kun__Trace__Start(
+    machopo__Trace__Start(
       path.as_ptr(),
       pointers.as_ptr(),
       pointers.len(),
@@ -66,22 +66,22 @@ pub fn start(path: &Path, categories: &[&str], buffer_kb: u32) -> bool {
 /// closed. Does nothing with no session.
 pub fn stop() {
   // SAFETY: no arguments; the C++ checks for a session.
-  unsafe { kun__Trace__Stop() }
+  unsafe { machopo__Trace__Stop() }
 }
 
-/// Begins a span named `name` on this thread (category `kun`); [`end`] ends
-/// the innermost one this thread began. A load and a branch when `kun`
+/// Begins a span named `name` on this thread (category `machopo`); [`end`] ends
+/// the innermost one this thread began. A load and a branch when `machopo`
 /// isn't being recorded.
 pub fn begin(name: &str) {
   // SAFETY: the C++ reads `name_len` bytes of `name` during the call (a
   // Perfetto `DynamicString`, copied into the trace), no NUL needed.
-  unsafe { kun__Trace__Begin(name.as_ptr() as *const c_char, name.len()) }
+  unsafe { machopo__Trace__Begin(name.as_ptr() as *const c_char, name.len()) }
 }
 
 /// Ends the innermost span [`begin`] began on this thread.
 pub fn end() {
   // SAFETY: no arguments.
-  unsafe { kun__Trace__End() }
+  unsafe { machopo__Trace__End() }
 }
 
 /// A User Timing mark named `name` (category `blink.user_timing`), as
@@ -91,7 +91,7 @@ pub fn end() {
 pub fn mark(name: &str, ago_ns: i64) {
   // SAFETY: as in `begin`.
   unsafe {
-    kun__Trace__Mark(name.as_ptr() as *const c_char, name.len(), ago_ns)
+    machopo__Trace__Mark(name.as_ptr() as *const c_char, name.len(), ago_ns)
   }
 }
 
@@ -103,7 +103,7 @@ pub fn mark(name: &str, ago_ns: i64) {
 pub fn measure(name: &str, start_ago_ns: i64, end_ago_ns: i64) {
   // SAFETY: as in `begin`.
   unsafe {
-    kun__Trace__Measure(
+    machopo__Trace__Measure(
       name.as_ptr() as *const c_char,
       name.len(),
       start_ago_ns,

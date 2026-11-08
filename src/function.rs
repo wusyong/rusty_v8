@@ -206,7 +206,7 @@ impl<'cb, T> ReturnValue<'cb, T> {
 impl<'cb> ReturnValue<'cb, Value> {
   #[inline(always)]
   pub fn from_function_callback_info(info: &'cb FunctionCallbackInfo) -> Self {
-    // kun: the return value's slot, read inline (`frame`).
+    // machopo: the return value's slot, read inline (`frame`).
     let slot = info.slot(frame::RETURN_VALUE) as usize;
     debug_assert_eq!(slot, unsafe {
       v8__FunctionCallbackInfo__GetReturnValue(info)
@@ -215,7 +215,7 @@ impl<'cb> ReturnValue<'cb, Value> {
   }
 }
 
-// kun: with pointer compression (and so V8's static roots, which kun's V8
+// machopo: with pointer compression (and so V8's static roots, which machopo's V8
 // has), the setters V8's header inlines write the return value's slot
 // here too, instead of a C++ call each: a Smi, an object's handle, or one
 // of the static roots (`include/v8-internal.h`'s
@@ -231,19 +231,19 @@ mod static_roots {
   pub(super) const EMPTY_STRING: usize = 0x49;
 }
 
-/// kun: the largest Smi: 31-bit Smis with pointer compression.
+/// machopo: the largest Smi: 31-bit Smis with pointer compression.
 #[cfg(feature = "v8_enable_pointer_compression")]
 const SMI_MAX: i64 = (1 << 30) - 1;
 
 #[cfg(feature = "v8_enable_pointer_compression")]
 impl<T> ReturnValue<'_, T> {
-  /// kun: `ReturnValue::SetInternal`: `value`'s lower 32 bits into the
+  /// machopo: `ReturnValue::SetInternal`: `value`'s lower 32 bits into the
   /// slot's, its upper ones (the cage's base) kept, with one store of the
   /// whole slot. A plain store of the same value LLVM narrows to the lower
   /// 32 bits (the upper ones are what it read), and the builtin that called
   /// the callback reads the slot whole as soon as it returns: a narrow store
   /// then a wide load of it can't forward, and the load waits for the store
-  /// to reach the cache (kun measured 2.3 ns of a 5.4 ns empty getter on
+  /// to reach the cache (machopo measured 2.3 ns of a 5.4 ns empty getter on
   /// x86-64). An atomic store is never narrowed; relaxed, it is a plain
   /// store (clang compiles V8's own `SetInternal` to the same).
   #[inline(always)]
@@ -258,7 +258,7 @@ impl<T> ReturnValue<'_, T> {
     );
   }
 
-  /// kun: writes the slot with `inline`, and in debug builds checks that
+  /// machopo: writes the slot with `inline`, and in debug builds checks that
   /// V8's own setter (`ffi`) writes the same.
   #[inline(always)]
   fn set_checked(
@@ -279,7 +279,7 @@ impl<T> ReturnValue<'_, T> {
     }
   }
 
-  /// kun: `value` as a Smi, if it is one.
+  /// machopo: `value` as a Smi, if it is one.
   #[inline(always)]
   fn smi(value: i64) -> Option<usize> {
     (-SMI_MAX - 1..=SMI_MAX)
@@ -304,7 +304,7 @@ where
     let value: Local<Value> = value.into();
     #[cfg(feature = "v8_enable_pointer_compression")]
     {
-      // kun: the handle's object (`frame`, `set_internal`).
+      // machopo: the handle's object (`frame`, `set_internal`).
       let object = unsafe { *(&*value as *const Value as *const usize) };
       self.set_checked(
         |rv| rv.set_internal(object),
@@ -317,7 +317,7 @@ where
     }
   }
 
-  /// kun: `ReturnValue::Set(const BasicTracedReference<S>&)`: the object
+  /// machopo: `ReturnValue::Set(const BasicTracedReference<S>&)`: the object
   /// `slot` refers to, read from its node, with no local handle made for it
   /// (`TracedSlot::get` is a C++ call making one); `false`, writing
   /// nothing, if the slot is empty.
@@ -360,7 +360,7 @@ where
     true
   }
 
-  /// kun: `ReturnValue::Set` of a weak global's object, read from the
+  /// machopo: `ReturnValue::Set` of a weak global's object, read from the
   /// handle's own location, with no local handle made for it (what
   /// `Weak::to_local` and then `set` cost: a call into V8); `false`,
   /// writing nothing, if V8 collected the object.
@@ -398,7 +398,7 @@ where
     true
   }
 
-  /// kun: `ReturnValue::Set(const Global<S>&)`: `value`'s object, read
+  /// machopo: `ReturnValue::Set(const Global<S>&)`: `value`'s object, read
   /// from the global's own slot, with no local handle made for it (what
   /// `Local::new` and then `set` cost: a call into V8).
   ///
@@ -418,7 +418,7 @@ where
     let value = unsafe { value.open(isolate) } as *const S as *const Value;
     #[cfg(feature = "v8_enable_pointer_compression")]
     {
-      // kun: the slot's object, as `set` reads a local's.
+      // machopo: the slot's object, as `set` reads a local's.
       let object = unsafe { *(value as *const usize) };
       self.set_checked(
         |rv| rv.set_internal(object),
@@ -551,7 +551,7 @@ pub struct FunctionCallbackInfoParts<'cb> {
   pub length: int,
 }
 
-// kun: V8's `FunctionCallbackInfo` is the callback's frame's slots
+// machopo: V8's `FunctionCallbackInfo` is the callback's frame's slots
 // (`values_`, `include/v8-function-callback.h`), which V8's header reads
 // inline; reading them here spares a C++ call each (the isolate, the
 // receiver, the return value's slot, the arguments' count and each
@@ -566,7 +566,7 @@ mod frame {
 }
 
 impl FunctionCallbackInfo {
-  /// kun: the frame's slot at `index` (`frame`).
+  /// machopo: the frame's slot at `index` (`frame`).
   #[inline(always)]
   fn slot(&self, index: isize) -> *mut usize {
     (self as *const Self as *mut usize).wrapping_offset(index)
@@ -574,7 +574,7 @@ impl FunctionCallbackInfo {
 
   #[inline(always)]
   pub(crate) fn get_isolate_ptr(&self) -> *mut RealIsolate {
-    // kun: read inline (`frame`).
+    // machopo: read inline (`frame`).
     let isolate = unsafe { *self.slot(frame::ISOLATE) } as *mut RealIsolate;
     debug_assert_eq!(isolate, unsafe {
       v8__FunctionCallbackInfo__GetIsolate(self)
@@ -607,7 +607,7 @@ impl FunctionCallbackInfo {
 
   #[inline(always)]
   pub(crate) fn this(&self) -> Local<'_, Object> {
-    // kun: the receiver's slot, read inline (`frame`).
+    // machopo: the receiver's slot, read inline (`frame`).
     let ptr = self.slot(frame::RECEIVER) as *mut Object;
     debug_assert_eq!(ptr as *const Object, unsafe {
       v8__FunctionCallbackInfo__This(self)
@@ -631,7 +631,7 @@ impl FunctionCallbackInfo {
 
   #[inline(always)]
   pub(crate) fn length(&self) -> int {
-    // kun: read inline (`frame`).
+    // machopo: read inline (`frame`).
     let length = unsafe { *self.slot(frame::ARGC) } as int;
     debug_assert_eq!(length, unsafe { v8__FunctionCallbackInfo__Length(self) });
     length
@@ -639,7 +639,7 @@ impl FunctionCallbackInfo {
 
   #[inline(always)]
   pub(crate) fn get(&self, index: int) -> Local<'_, Value> {
-    // kun: an argument there is, read inline (`frame`); past them,
+    // machopo: an argument there is, read inline (`frame`); past them,
     // `undefined`, V8's.
     if (0..self.length()).contains(&index) {
       let ptr = self.slot(frame::FIRST_ARGUMENT + index as isize) as *mut Value;

@@ -1,4 +1,4 @@
-// kun: a GC object's pointer to a JS value that is sound to trace from a
+// machopo: a GC object's pointer to a JS value that is sound to trace from a
 // concurrent marker thread while the heap's thread writes it: `TracedSlot`.
 // It sits next to upstream's `TracedReference`, which it doesn't change,
 // and calls the same C functions.
@@ -143,7 +143,7 @@ impl<T> TracedSlot<T> {
     }
   }
 
-  // `pub(crate)` for `crate::kun`, which marks and resets slots too.
+  // `pub(crate)` for `crate::machopo`, which marks and resets slots too.
   pub(crate) fn raw(&self) -> *mut TracedReference<Data> {
     self.storage.get().cast()
   }
@@ -198,7 +198,7 @@ impl<T> TracedSlot<T> {
     }
   }
 
-  /// kun: the object the slot refers to, read in place as V8's header
+  /// machopo: the object the slot refers to, read in place as V8's header
   /// reads it (`BasicTracedReference::ptr`: the slot points to its node's
   /// object, a full address), or `None` if the slot is empty.
   ///

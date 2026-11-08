@@ -1,9 +1,9 @@
-// kun: a Perfetto tracing session for the embedder, and its own track
+// machopo: a Perfetto tracing session for the embedder, and its own track
 // events, in the same trace as V8's (V8 is built with `v8_use_perfetto`).
 // What Chromium's tracing does for Chrome, for a single process: V8 and the
 // embedder write into Perfetto's in-process backend, one session records the
 // categories asked for, and the trace streams into a file as it goes. See
-// `src/kun_trace.rs`.
+// `src/machopo_trace.rs`.
 
 #include <atomic>
 #include <cstddef>
@@ -29,11 +29,11 @@
 // The embedder's spans, their names given at run time, and the page's User
 // Timing marks and measures under Blink's category for them.
 PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE(
-    kun_trace,
-    perfetto::Category("kun").SetDescription("The embedder's own spans"),
+    machopo_trace,
+    perfetto::Category("machopo").SetDescription("The embedder's own spans"),
     perfetto::Category("blink.user_timing")
         .SetDescription("The page's performance.mark() and measure()"));
-PERFETTO_TRACK_EVENT_STATIC_STORAGE_IN_NAMESPACE(kun_trace);
+PERFETTO_TRACK_EVENT_STATIC_STORAGE_IN_NAMESPACE(machopo_trace);
 
 namespace {
 
@@ -104,14 +104,14 @@ extern "C" {
 
 // Starts recording into the file at `path` (on Windows, in the C runtime's
 // ANSI code page): the track events of `categories` (V8's and the
-// embedder's `kun`), through a buffer of `buffer_kb` that is written out
+// embedder's `machopo`), through a buffer of `buffer_kb` that is written out
 // every second; if more than that comes in a second, the oldest of it is
 // overwritten, which the trace's stats count as data loss (Perfetto wants a
 // ring buffer with `write_into_file`: a `DISCARD` one loses data in ways
 // that don't show). Before V8's platform is initialized, or V8 doesn't
 // register its events. False if the file can't be written or a session
 // was already started.
-bool kun__Trace__Start(const char* path, const char* const* categories,
+bool machopo__Trace__Start(const char* path, const char* const* categories,
                        size_t category_count, uint32_t buffer_kb) {
   if (session != nullptr) return false;
   int fd = OpenForWriting(path);
@@ -122,7 +122,7 @@ bool kun__Trace__Start(const char* path, const char* const* categories,
   args.log_message_callback = LogErrors;
   args.shmem_size_hint_kb = kSharedMemoryKb;
   perfetto::Tracing::Initialize(args);
-  kun_trace::TrackEvent::Register();
+  machopo_trace::TrackEvent::Register();
 
   perfetto::TraceConfig config;
   auto* buffer = config.add_buffers();
@@ -148,9 +148,9 @@ bool kun__Trace__Start(const char* path, const char* const* categories,
 
 // Stops recording: what is left in the buffer is written out and the file
 // closed. Does nothing with no session.
-void kun__Trace__Stop() {
+void machopo__Trace__Stop() {
   if (session == nullptr) return;
-  kun_trace::TrackEvent::Flush();
+  machopo_trace::TrackEvent::Flush();
   session->StopBlocking();
   delete session;
   session = nullptr;
@@ -160,27 +160,27 @@ void kun__Trace__Stop() {
 
 // Begins and ends a span of the embedder on this thread's track (nested
 // spans end in the reverse order). `name` needn't be NUL-terminated or
-// outlive the call. Off (one load and branch) unless `kun` is recorded.
-void kun__Trace__Begin(const char* name, size_t name_len) {
-  PERFETTO_USE_CATEGORIES_FROM_NAMESPACE_SCOPED(kun_trace);
-  TRACE_EVENT_BEGIN("kun", perfetto::DynamicString(name, name_len));
+// outlive the call. Off (one load and branch) unless `machopo` is recorded.
+void machopo__Trace__Begin(const char* name, size_t name_len) {
+  PERFETTO_USE_CATEGORIES_FROM_NAMESPACE_SCOPED(machopo_trace);
+  TRACE_EVENT_BEGIN("machopo", perfetto::DynamicString(name, name_len));
 }
 
-void kun__Trace__End() {
-  PERFETTO_USE_CATEGORIES_FROM_NAMESPACE_SCOPED(kun_trace);
-  TRACE_EVENT_END("kun");
+void machopo__Trace__End() {
+  PERFETTO_USE_CATEGORIES_FROM_NAMESPACE_SCOPED(machopo_trace);
+  TRACE_EVENT_END("machopo");
 }
 
 // A User Timing mark, as Blink's `UserTiming` writes one: an instant on this
 // thread's track, at its time (`ago_ns` before now; a mark's time may be
 // given, in the past or the future). `name` as for Begin. Off unless
 // `blink.user_timing` is recorded.
-void kun__Trace__Mark(const char* name, size_t name_len, int64_t ago_ns) {
-  PERFETTO_USE_CATEGORIES_FROM_NAMESPACE_SCOPED(kun_trace);
+void machopo__Trace__Mark(const char* name, size_t name_len, int64_t ago_ns) {
+  PERFETTO_USE_CATEGORIES_FROM_NAMESPACE_SCOPED(machopo_trace);
   if (!TRACE_EVENT_CATEGORY_ENABLED("blink.user_timing")) return;
   TRACE_EVENT_INSTANT("blink.user_timing",
                       perfetto::DynamicString(name, name_len),
-                      TraceTimeAgo(kun_trace::TrackEvent::GetTraceTimeNs(),
+                      TraceTimeAgo(machopo_trace::TrackEvent::GetTraceTimeNs(),
                                    ago_ns));
 }
 
@@ -189,12 +189,12 @@ void kun__Trace__Mark(const char* name, size_t name_len, int64_t ago_ns) {
 // Measures overlap as they please, even those of a name, which slices on
 // one track can't. An end before the start is written as it is, as Chrome
 // does; on its own track it spoils no other slice.
-void kun__Trace__Measure(const char* name, size_t name_len,
+void machopo__Trace__Measure(const char* name, size_t name_len,
                          int64_t start_ago_ns, int64_t end_ago_ns) {
-  PERFETTO_USE_CATEGORIES_FROM_NAMESPACE_SCOPED(kun_trace);
+  PERFETTO_USE_CATEGORIES_FROM_NAMESPACE_SCOPED(machopo_trace);
   if (!TRACE_EVENT_CATEGORY_ENABLED("blink.user_timing")) return;
   // One now for both ends, or the end would be late by the begin's writing.
-  uint64_t now = kun_trace::TrackEvent::GetTraceTimeNs();
+  uint64_t now = machopo_trace::TrackEvent::GetTraceTimeNs();
   perfetto::Track track(NextMeasureTrackId(),
                         perfetto::ThreadTrack::Current());
   TRACE_EVENT_BEGIN("blink.user_timing",

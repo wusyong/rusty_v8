@@ -1041,7 +1041,7 @@ impl<T> Weak<T> {
     }
   }
 
-  /// kun: the handle's location (holding the object, as a local's does)
+  /// machopo: the handle's location (holding the object, as a local's does)
   /// if V8 still has the object, checked to be `isolate`'s: for
   /// `ReturnValue::set_weak`, which reads it with no local handle made.
   #[inline]
@@ -1174,7 +1174,7 @@ impl<T> Drop for Weak<T> {
       unsafe { v8__Global__Reset(data.cast().as_ptr()) };
       remove_finalizer(self.data.as_ref().unwrap().finalizer_id);
     } else if let Some(weak_data) = self.data.take() {
-      // kun: the isolate's handle is disposed (`get_pointer` returned None)
+      // machopo: the isolate's handle is disposed (`get_pointer` returned None)
       // but the handle was never reset: `OwnedIsolate::drop` runs the
       // guaranteed finalizers -- a context's annex, and this Weak with it --
       // after disposing the handle and before V8's teardown, whose GC may

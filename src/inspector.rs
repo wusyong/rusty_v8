@@ -154,7 +154,7 @@ unsafe extern "C" {
     humanReadableName: StringView,
     auxData: StringView,
   );
-  // kun: `contextCreated` with the context's origin.
+  // machopo: `contextCreated` with the context's origin.
   fn v8_inspector__V8Inspector__contextCreatedWithOrigin(
     this: *mut RawV8Inspector,
     context: *const Context,
@@ -163,7 +163,7 @@ unsafe extern "C" {
     origin: StringView,
     auxData: StringView,
   );
-  // kun: `resetContextGroup`.
+  // machopo: `resetContextGroup`.
   fn v8_inspector__V8Inspector__resetContextGroup(
     this: *mut RawV8Inspector,
     contextGroupId: int,
@@ -207,7 +207,7 @@ unsafe extern "C" {
     stack_trace: *mut V8StackTrace,
     script_id: int,
   ) -> u32;
-  // kun: a promise's rejection handled after it was reported.
+  // machopo: a promise's rejection handled after it was reported.
   fn v8_inspector__V8Inspector__exceptionRevoked(
     this: *mut RawV8Inspector,
     context: *const Context,
@@ -219,14 +219,14 @@ unsafe extern "C" {
     stack_trace: *const StackTrace,
   ) -> *mut V8StackTrace;
   fn v8_inspector__V8StackTrace__DELETE(this: *mut V8StackTrace);
-  // kun: the stack as script runs, with its async chain.
+  // machopo: the stack as script runs, with its async chain.
   fn v8_inspector__V8Inspector__captureStackTrace(
     this: *mut RawV8Inspector,
     full_stack: bool,
   ) -> *mut V8StackTrace;
-  // kun: `V8StackTrace::isEmpty`.
+  // machopo: `V8StackTrace::isEmpty`.
   fn v8_inspector__V8StackTrace__isEmpty(this: *const V8StackTrace) -> bool;
-  // kun: `V8StackTrace::buildInspectorObject`, in CBOR.
+  // machopo: `V8StackTrace::buildInspectorObject`, in CBOR.
   fn v8_inspector__V8StackTrace__buildInspectorObject(
     this: *const V8StackTrace,
     max_async_depth: int,
@@ -277,7 +277,7 @@ unsafe extern "C" fn v8_inspector__V8InspectorClient__BASE__generateUniqueId(
   }
 }
 
-// kun: the embedder's clock.
+// machopo: the embedder's clock.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn v8_inspector__V8InspectorClient__BASE__currentTimeMS(
   this: *mut RawV8InspectorClient,
@@ -630,7 +630,7 @@ pub trait V8InspectorClientImpl {
     0 // 0 = let V8 pick a unique id itself
   }
 
-  /// kun: ms since the epoch, as `Date.now()` (Blink's
+  /// machopo: ms since the epoch, as `Date.now()` (Blink's
   /// `ThreadDebuggerCommonImpl::currentTimeMS`): the console's and the
   /// protocol's times. V8's default answers 0.
   fn current_time_ms(&self) -> f64 {
@@ -1358,7 +1358,7 @@ impl V8Inspector {
     }
   }
 
-  // kun: `context_created` with the context's origin
+  // machopo: `context_created` with the context's origin
   // (`V8ContextInfo::origin`), which DevTools shows a context by.
   /// [`Self::context_created`], with the context's origin.
   pub fn context_created_with_origin(
@@ -1381,7 +1381,7 @@ impl V8Inspector {
     }
   }
 
-  // kun: `resetContextGroup`, unbound upstream.
+  // machopo: `resetContextGroup`, unbound upstream.
   /// Every context of the group gone at once, with its console messages
   /// (`Runtime.executionContextsCleared`).
   pub fn reset_context_group(&self, context_group_id: i32) {
@@ -1497,7 +1497,7 @@ impl V8Inspector {
     }
   }
 
-  /// kun: the exception `exception_id` (what [`Self::exception_thrown`]
+  /// machopo: the exception `exception_id` (what [`Self::exception_thrown`]
   /// returned) is no longer unhandled: a promise's rejection was handled
   /// after it was reported, as `message` says.
   pub fn exception_revoked(
@@ -1528,7 +1528,7 @@ impl V8Inspector {
     }
   }
 
-  // kun: `captureStackTrace`, for DevTools' Network initiators.
+  // machopo: `captureStackTrace`, for DevTools' Network initiators.
   /// The stack as script runs, with the async chain the inspector keeps
   /// (`await`s and the async tasks the embedder reports). With `full_stack`
   /// false, as many frames as a session with `Runtime` enabled asks for, or
@@ -1558,7 +1558,7 @@ pub struct V8StackTrace {
   _cxx_vtable: CxxVTable,
 }
 
-// kun: what kun's DevTools reads of a captured stack.
+// machopo: what machopo's DevTools reads of a captured stack.
 impl V8StackTrace {
   /// No frames: no script was running.
   pub fn is_empty(&self) -> bool {

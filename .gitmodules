@@ -1,6 +1,6 @@
 [submodule "v8"]
 	path = v8
-	# kun: kun's V8 fork (README.kun.md, "kun's own V8").
+	# machopo: machopo's V8 fork (README.machopo.md, "machopo's own V8").
 	url = https://github.com/wusyong/v8.git
 [submodule "build"]
 	path = build

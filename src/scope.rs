@@ -340,7 +340,7 @@ mod get_isolate_impls {
     }
   }
 
-  // kun: an object's callbacks (a refused access check's report, which
+  // machopo: an object's callbacks (a refused access check's report, which
   // has no context) run in its isolate, the thread's current one.
   impl GetIsolate for Local<'_, Object> {
     fn get_isolate_ptr(&self) -> *mut RealIsolate {
@@ -571,7 +571,7 @@ impl<'s> PinnedRef<'s, HandleScope<'_>> {
     unsafe { Local::from_raw_unchecked(context_ptr) }
   }
 
-  /// kun: The incumbent context (V8's `Isolate::GetIncumbentContext`): the
+  /// machopo: The incumbent context (V8's `Isolate::GetIncumbentContext`): the
   /// realm of the most recent script (or callback) on the stack, HTML's
   /// incumbent realm.
   pub fn get_incumbent_context(&self) -> Local<'_, Context> {
