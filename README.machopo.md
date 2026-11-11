@@ -173,6 +173,15 @@ Code changes are marked with `machopo:` comments.
   conversion's, about 57 instructions, even of a string). A V8 update must
   check the constants as `one_byte_chars`'s; debug builds check every
   answer against `Value::is_string`. Rust only.
+- **`v8::machopo::as_smi`** (`src/machopo.rs`, 2026-11-11): a value as a
+  small integer if it is one (`kSmiTag`, `kSmiTagSize`, the 31-bit Smi of
+  pointer compression: `Internals::SmiValue`), read from the handle with
+  no call into V8, as V8's inline `Value::IsInt32` and `Int32::Value` tell
+  one. machopo converts a DOM member's integer argument with `ToNumber` (a
+  call into V8, which may run script) only when this says it is no Smi. A
+  V8 update must check the tagging constants against
+  `include/v8-internal.h`; debug builds check every answer against
+  `Value::is_int32` and `Int32::value`. Rust only.
 - **`FunctionCallbackInfo::isolate`** (`src/function.rs`, 2026-11-11): where
   a function callback's frame holds its isolate's pointer (the slot
   `CallbackScope::new` reads), as a pointer to an `Isolate` (which is that

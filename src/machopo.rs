@@ -728,6 +728,30 @@ pub fn as_string<'s>(value: Local<'s, Value>) -> Option<Local<'s, crate::String>
   is_string.then(|| unsafe { Local::cast_unchecked(value) })
 }
 
+/// machopo: `value` as a small integer if it is one (a Smi: V8's tagged
+/// value with `kSmiTag`, 31 bits with pointer compression,
+/// `Internals::SmiValue`), with no call into V8: what most integer
+/// arguments are. `None` for a heap number, which V8's `Number::Value`
+/// reads. Debug builds check it against V8's own calls.
+#[inline(always)]
+pub fn as_smi(value: Local<'_, Value>) -> Option<i32> {
+  // SAFETY: as `unwrap_inline`'s: a handle's location holds its value's
+  // tagged address; a Smi's low bit is clear (`kSmiTag`, `kSmiTagSize`) and
+  // its value the 32 bits above it (`kSmiShiftSize` is 0 with pointer
+  // compression, where `kSmiValueSize` is 31).
+  let smi = unsafe {
+    let tagged = *(&*value as *const Value).cast::<usize>();
+    (tagged & HEAP_OBJECT_TAG == 0).then(|| (tagged as u32 as i32) >> 1)
+  };
+  debug_assert_eq!(smi, {
+    let int32: Option<Local<'_, crate::Int32>> =
+      value.is_int32().then(|| unsafe { Local::cast_unchecked(value) });
+    // An int32 that is no Smi is a heap number.
+    int32.map(|int32| int32.value()).filter(|_| smi.is_some())
+  });
+  smi
+}
+
 /// A shallow copy of `object` (V8's `Object::Clone`): a new wrapper from a
 /// boilerplate one, as Blink's `V8PerContextData::CreateWrapperFromCache`,
 /// instead of instantiating its template again.
