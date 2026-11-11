@@ -41,7 +41,6 @@ use std::ptr::{self, NonNull};
 
 use crate::cppgc::{Heap, TracedSlot};
 use crate::isolate::RealIsolate;
-use crate::scope::GetIsolate;
 use crate::support::MapFnTo;
 use crate::support::Opaque;
 use crate::{
@@ -808,17 +807,14 @@ impl TracedSlot<Object> {
   ///
   /// # Safety
   ///
-  /// As [`TracedSlot::set`]: on the heap's thread, `scope`'s isolate's;
-  /// the slot in its final place, never moved again.
-  pub unsafe fn set_droppable<'s>(
-    &self,
-    scope: &PinScope<'s, '_, ()>,
-    value: Local<'s, Object>,
-  ) {
-    // SAFETY: as the caller promises; `value` a handle in `scope`.
+  /// As [`TracedSlot::set`]: on the heap's thread, `isolate` that heap's (it
+  /// takes the isolate, not a scope: no handle is made); the slot in its
+  /// final place, never moved again.
+  pub unsafe fn set_droppable(&self, isolate: &Isolate, value: Local<'_, Object>) {
+    // SAFETY: as the caller promises; `value` a handle of `isolate`.
     unsafe {
       v8__machopo__TracedReference__SetDroppable(
-        scope.get_isolate_ptr(),
+        isolate.as_real_ptr(),
         self.raw(),
         &*value,
       );
