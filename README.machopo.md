@@ -201,10 +201,14 @@ Code changes are marked with `machopo:` comments.
   made in V8's current handle scope, the callback's
   (`TracedSlot::get_in_current_scope`). A scope still passes as the
   isolate. Rust only.
-- **`TracedSlot::set_droppable` takes the isolate** (`src/machopo.rs`,
-  2026-11-12), not a scope: it makes a traced handle, no local, and a
-  callback with no scope calls it (a new node's wrapper, made ahead, made
-  the node's). A scope still passes as the isolate. Rust only.
+- **`TracedSlot::set` and `set_droppable` take the isolate**
+  (`src/cppgc/slot.rs`, `src/machopo.rs`, 2026-11-12), not a scope: they
+  make a traced handle, no local, and a callback with no scope calls them
+  (a new node's wrapper, made ahead, made the node's; a listener's callback
+  stored). A scope still passes as the isolate. **`TracedSlot::refers_to`**
+  tells whether the slot's object is a handle's, read in place
+  (`object_address`): a listener already added is found with no local made
+  of each one's callback. Rust only.
 - **Isolate data read inline** (`src/isolate.rs`, 2026-10-27):
   `get_data_internal` (and so the annex every scope looks up, and
   `get_data`) reads V8's isolate data slots at

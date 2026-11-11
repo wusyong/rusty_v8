@@ -36,7 +36,6 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 
 use super::{Visitor, cppgc__Visitor__Trace__TracedReference};
 use crate::isolate::RealIsolate;
-use crate::scope::GetIsolate;
 use crate::{Data, Local, PinScope, TracedReference};
 
 // Upstream declares these in `handle.rs`, private to it; the same
@@ -179,21 +178,35 @@ impl<T> TracedSlot<T> {
   ///
   /// # Safety
   ///
-  /// On the heap's thread, which `scope`'s isolate must be the heap of. The
-  /// slot must be in its final place: a field of a GC object already on the
-  /// heap, never moved again.
-  pub unsafe fn set<'s>(
-    &self,
-    scope: &PinScope<'s, '_, ()>,
-    value: Option<Local<'s, T>>,
-  ) {
+  /// On the heap's thread, which `isolate` must be the heap of (machopo: it
+  /// takes the isolate, not a scope: it makes a traced handle, no local).
+  /// The slot must be in its final place: a field of a GC object already
+  /// on the heap, never moved again.
+  pub unsafe fn set(&self, isolate: &crate::Isolate, value: Option<Local<'_, T>>) {
     let value = value
       .map_or(std::ptr::null_mut(), |v| v.as_non_null().as_ptr())
       .cast();
     // SAFETY: a live slot in its final place, on the heap's thread, per the
-    // caller; `value` is a handle in `scope`.
+    // caller; `value` is a handle of `isolate`.
     unsafe {
-      v8__TracedReference__Reset(self.raw(), scope.get_isolate_ptr(), value)
+      v8__TracedReference__Reset(self.raw(), isolate.as_real_ptr(), value)
+    }
+  }
+
+  /// machopo: whether the slot refers to the object `value` does (the
+  /// same one, as `Local`'s `==` of two objects' handles), read in place
+  /// with no local handle made of the slot's.
+  ///
+  /// # Safety
+  ///
+  /// As `get`: on the heap's thread.
+  #[inline(always)]
+  pub unsafe fn refers_to<S>(&self, value: Local<'_, S>) -> bool {
+    // SAFETY: on the heap's thread, per the caller; a handle's location
+    // holds its value's tagged address, as the slot's node does.
+    unsafe {
+      self.object_address()
+        == Some(*(&*value as *const S).cast::<usize>())
     }
   }
 
