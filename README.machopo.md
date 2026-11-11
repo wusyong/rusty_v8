@@ -173,6 +173,25 @@ Code changes are marked with `machopo:` comments.
   conversion's, about 57 instructions, even of a string). A V8 update must
   check the constants as `one_byte_chars`'s; debug builds check every
   answer against `Value::is_string`. Rust only.
+- **`FunctionCallbackInfo::isolate`** (`src/function.rs`, 2026-11-11): where
+  a function callback's frame holds its isolate's pointer (the slot
+  `CallbackScope::new` reads), as a pointer to an `Isolate` (which is that
+  pointer, transparent): the isolate with no `CallbackScope` made. machopo's
+  callbacks of DOM members take V8's `FunctionCallbackInfo` itself
+  (`FunctionTemplate::builder_raw`) and read the isolate, the receiver, the
+  arguments and the return value from it, as Blink's generated callbacks
+  do; they make a scope only where they allocate, throw or run script.
+  rusty_v8's `FunctionCallbackArguments::get_isolate` isn't used for this:
+  it casts V8's isolate pointer to a `*mut Isolate`, a pointer to that
+  pointer, and faults when used (not reported upstream). Debug builds
+  check the slot against V8's `GetIsolate`. Rust only.
+- **`ReturnValue::set_traced` takes the isolate** (`src/function.rs`,
+  2026-11-11), not a scope: it returns what has a handle already, and a
+  callback with no scope calls it. Where it calls V8's own setter (debug
+  builds' check, and builds without pointer compression), the local is
+  made in V8's current handle scope, the callback's
+  (`TracedSlot::get_in_current_scope`). A scope still passes as the
+  isolate. Rust only.
 - **Isolate data read inline** (`src/isolate.rs`, 2026-10-27):
   `get_data_internal` (and so the annex every scope looks up, and
   `get_data`) reads V8's isolate data slots at

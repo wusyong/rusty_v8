@@ -324,12 +324,15 @@ where
   ///
   /// # Safety
   ///
-  /// As `TracedSlot::get`: on the slot's heap's thread, `scope`'s isolate
-  /// that heap's.
+  /// As `TracedSlot::get`: on the slot's heap's thread, `isolate` that
+  /// heap's. It takes the isolate, not a scope: none is needed to return
+  /// what has a handle already (in debug builds, and without pointer
+  /// compression, V8's own setter is given a local made in V8's current
+  /// handle scope, a callback's own).
   #[inline(always)]
   pub unsafe fn set_traced<S>(
     &mut self,
-    scope: &crate::PinScope<'_, '_, ()>,
+    isolate: &Isolate,
     slot: &crate::cppgc::TracedSlot<S>,
   ) -> bool
   where
@@ -343,20 +346,19 @@ where
     self.set_checked(
       |rv| rv.set_internal(object),
       |raw| unsafe {
-        let value = slot.get(scope).expect("a traced reference set");
-        v8__ReturnValue__Value__Set(raw, &*value as *const S as *const Value)
+        let value = slot.get_in_current_scope(isolate);
+        assert!(!value.is_null(), "a traced reference set");
+        v8__ReturnValue__Value__Set(raw, value as *const Value)
       },
     );
     #[cfg(not(feature = "v8_enable_pointer_compression"))]
     unsafe {
-      let value = slot.get(scope).expect("a traced reference set");
-      v8__ReturnValue__Value__Set(
-        &mut self.0,
-        &*value as *const S as *const Value,
-      )
+      let value = slot.get_in_current_scope(isolate);
+      assert!(!value.is_null(), "a traced reference set");
+      v8__ReturnValue__Value__Set(&mut self.0, value as *const Value)
     }
     #[cfg(feature = "v8_enable_pointer_compression")]
-    let _ = scope;
+    let _ = isolate;
     true
   }
 
@@ -580,6 +582,22 @@ impl FunctionCallbackInfo {
       v8__FunctionCallbackInfo__GetIsolate(self)
     });
     isolate
+  }
+
+  /// machopo: where the callback's frame holds its isolate's pointer
+  /// (`frame`), which an [`Isolate`] is (transparent): the isolate with no
+  /// scope made, for a callback that needs none (`CallbackScope::new`
+  /// reads the same slot). Valid while the callback runs; a reference made
+  /// of it is the caller's to keep unique.
+  #[inline(always)]
+  pub fn isolate(&self) -> std::ptr::NonNull<Isolate> {
+    debug_assert_eq!(unsafe { *self.slot(frame::ISOLATE) }, unsafe {
+      v8__FunctionCallbackInfo__GetIsolate(self) as usize
+    });
+    // SAFETY: a slot of the frame, never null.
+    unsafe {
+      std::ptr::NonNull::new_unchecked(self.slot(frame::ISOLATE).cast())
+    }
   }
 
   /// Returns the common callback entry values with a single C++ shim call.

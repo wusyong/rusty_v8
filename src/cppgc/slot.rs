@@ -148,6 +148,23 @@ impl<T> TracedSlot<T> {
     self.storage.get().cast()
   }
 
+  /// machopo: as `get`, the handle left in V8's current handle scope (a
+  /// callback's own, which V8 opens around it) with no scope of rusty_v8's
+  /// to name it by: its location, null if the slot is empty.
+  ///
+  /// # Safety
+  ///
+  /// As `get`; the location is read before the current handle scope ends.
+  pub(crate) unsafe fn get_in_current_scope(
+    &self,
+    isolate: &crate::Isolate,
+  ) -> *const T {
+    // SAFETY: on the only thread that writes the slot, per the caller.
+    unsafe {
+      v8__TracedReference__Get(self.raw(), isolate.as_real_ptr()) as *const T
+    }
+  }
+
   /// Whether the slot is empty, read atomically: the C++ object is a single
   /// pointer (`location_`), null when empty, as `IsEmptyThreadSafe` reads it.
   fn is_empty(&self) -> bool {
