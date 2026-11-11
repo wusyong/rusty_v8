@@ -164,6 +164,15 @@ Code changes are marked with `machopo:` comments.
   `include/v8-internal.h`, `src/objects/string.h` and
   `src/objects/instance-type.h`; debug builds check every read against
   `ValueView`'s. Rust only.
+- **`v8::machopo::as_string`** (`src/machopo.rs`, 2026-11-11): a value as a
+  string if it is one, told from its map's instance type
+  (`Internals::kFirstNonstringType`) as V8's inline `Value::IsString` does,
+  with no call into V8. machopo converts a DOM member's string argument
+  with WebIDL's `ToString` only when this says it isn't a string yet
+  (rusty_v8's `Value::to_string` is two C++ calls, the context's and the
+  conversion's, about 57 instructions, even of a string). A V8 update must
+  check the constants as `one_byte_chars`'s; debug builds check every
+  answer against `Value::is_string`. Rust only.
 - **Isolate data read inline** (`src/isolate.rs`, 2026-10-27):
   `get_data_internal` (and so the annex every scope looks up, and
   `get_data`) reads V8's isolate data slots at

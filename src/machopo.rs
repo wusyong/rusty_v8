@@ -703,6 +703,31 @@ const STRING_REPRESENTATION_AND_ENCODING: u16 = 0x0f;
 const SEQ_ONE_BYTE_STRING: u16 = 0x08;
 const THIN_STRING: u16 = 0x05;
 
+/// machopo: `value` as a string if it is one, told as V8's header tells
+/// (`Value::IsString`, inline there: a heap object whose map's instance
+/// type is below `Internals::kFirstNonstringType`), with no call into V8.
+/// Debug builds check it against V8's own call.
+#[inline(always)]
+pub fn as_string<'s>(value: Local<'s, Value>) -> Option<Local<'s, crate::String>> {
+  // SAFETY: as `unwrap_inline`'s: a handle's location holds its value's
+  // tagged address (a small integer's low bit is clear), whose map
+  // (compressed, in its cage) holds its instance type.
+  let is_string = unsafe {
+    let object = *(&*value as *const Value).cast::<usize>();
+    object & HEAP_OBJECT_TAG != 0 && {
+      let cage = object & !(CAGE_ALIGNMENT - 1);
+      let map = cage + ((object - HEAP_OBJECT_TAG) as *const u32).read() as usize;
+      let instance_type = ((map - HEAP_OBJECT_TAG + MAP_INSTANCE_TYPE_OFFSET)
+        as *const u16)
+        .read();
+      instance_type < FIRST_NONSTRING_TYPE
+    }
+  };
+  debug_assert_eq!(is_string, value.is_string());
+  // SAFETY: a string, checked above.
+  is_string.then(|| unsafe { Local::cast_unchecked(value) })
+}
+
 /// A shallow copy of `object` (V8's `Object::Clone`): a new wrapper from a
 /// boilerplate one, as Blink's `V8PerContextData::CreateWrapperFromCache`,
 /// instead of instantiating its template again.
