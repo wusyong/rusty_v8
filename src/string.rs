@@ -572,6 +572,80 @@ impl String {
     }
   }
 
+  /// machopo: `new_from_utf8` with no scope made, in a callback of V8's
+  /// (its string a handle of the callback's own handle scope): the same
+  /// string, by the same paths (ASCII as one-byte data, long non-ASCII
+  /// decoded by simdutf, the rest V8's decoder). Only an empty value when
+  /// it is longer than V8's strings may be.
+  ///
+  /// # Safety
+  ///
+  /// Called in a callback of V8's on `isolate`'s thread (a handle scope of
+  /// V8's is open, which outlives the callback), and the handle isn't used
+  /// after the callback returns: `'s` is the caller's to bound by it (its
+  /// info's lifetime).
+  pub unsafe fn new_from_utf8_in_callback<'s>(
+    isolate: &Isolate,
+    buffer: &[u8],
+    new_type: NewStringType,
+  ) -> Option<Local<'s, String>> {
+    let isolate = isolate.as_real_ptr();
+    // SAFETY: the isolate, on its thread, per the caller; the data and its
+    // length are a slice's; the handles are V8's, of its open handle scope.
+    unsafe {
+      if buffer.is_empty() {
+        return Local::from_raw(v8__String__Empty(isolate));
+      }
+      if buffer.len() <= Self::MAX_LENGTH {
+        if onebyte_is_ascii(buffer) {
+          return Local::from_raw(v8__String__NewFromOneByte(
+            isolate,
+            buffer.as_ptr(),
+            new_type,
+            buffer.len().try_into().ok()?,
+          ));
+        }
+        if buffer.len() >= NONASCII_ENCODE_SIMD_THRESHOLD {
+          // As `new_from_utf8_transcode`: Latin-1 if it is, else UTF-16.
+          let mut latin1: Vec<u8> = Vec::with_capacity(buffer.len());
+          let out =
+            std::slice::from_raw_parts_mut(latin1.as_mut_ptr(), buffer.len());
+          let r =
+            crate::simdutf::convert_utf8_to_latin1_with_errors(buffer, out);
+          if r.is_ok() {
+            latin1.set_len(r.count);
+            return Local::from_raw(v8__String__NewFromOneByte(
+              isolate,
+              latin1.as_ptr(),
+              new_type,
+              latin1.len().try_into().ok()?,
+            ));
+          }
+          let mut utf16: Vec<u16> = Vec::with_capacity(buffer.len());
+          let out =
+            std::slice::from_raw_parts_mut(utf16.as_mut_ptr(), buffer.len());
+          let r =
+            crate::simdutf::convert_utf8_to_utf16le_with_errors(buffer, out);
+          if r.is_ok() {
+            utf16.set_len(r.count);
+            return Local::from_raw(v8__String__NewFromTwoByte(
+              isolate,
+              utf16.as_ptr(),
+              new_type,
+              utf16.len().try_into().ok()?,
+            ));
+          }
+        }
+      }
+      Local::from_raw(v8__String__NewFromUtf8(
+        isolate,
+        buffer.as_ptr() as *const char,
+        new_type,
+        buffer.len().try_into().ok()?,
+      ))
+    }
+  }
+
   /// Allocates a new string from Latin-1 data.  Only returns an empty value when
   /// length > kMaxLength.
   #[inline(always)]

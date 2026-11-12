@@ -224,6 +224,13 @@ Code changes are marked with `machopo:` comments.
   2026-11-12): an interceptor's raw callback (`getter_raw`) reads its
   isolate, holder and data from the info with no `CallbackScope` made, as
   a function's does (`FunctionCallbackInfo::isolate`). Rust only.
+- **`String::new_from_utf8_in_callback`** (`src/string.rs`, 2026-11-12):
+  `new_from_utf8` with no scope made, for a callback of V8's (the string a
+  handle of the callback's own handle scope, as `unseal_in_callback`'s):
+  the same string by the same paths (ASCII as one-byte data, long
+  non-ASCII decoded by simdutf, the rest V8's decoder). machopo's bindings
+  make a result's string with it, given the callback's info alone. Rust
+  only.
 - **`SealedLocal::unseal_in_callback`** (`src/handle.rs`, 2026-11-12): a
   raw interceptor callback's name and value (sealed: rusty_v8's own
   trampolines unseal them in the scope they make) as handles, with no
