@@ -224,6 +224,10 @@ Code changes are marked with `machopo:` comments.
   2026-11-12): an interceptor's raw callback (`getter_raw`) reads its
   isolate, holder and data from the info with no `CallbackScope` made, as
   a function's does (`FunctionCallbackInfo::isolate`). Rust only.
+- **`SealedLocal::unseal_in_callback`** (`src/handle.rs`, 2026-11-12): a
+  raw interceptor callback's name and value (sealed: rusty_v8's own
+  trampolines unseal them in the scope they make) as handles, with no
+  scope made. Rust only.
 - **Isolate data read inline** (`src/isolate.rs`, 2026-10-27):
   `get_data_internal` (and so the annex every scope looks up, and
   `get_data`) reads V8's isolate data slots at

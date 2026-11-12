@@ -1425,3 +1425,20 @@ impl<T> Drop for Eternal<T> {
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct SealedLocal<T>(pub(crate) NonNull<T>);
+
+impl<T> SealedLocal<T> {
+  /// machopo: the handle with no scope of rusty_v8's to unseal it by
+  /// (`HandleScope::unseal`): for a raw interceptor callback
+  /// (`getter_raw`), given its name and value sealed, that makes no scope.
+  ///
+  /// # Safety
+  ///
+  /// The handle is one V8 passed a callback (rooted in a handle scope of
+  /// V8's that outlives the callback), and isn't used after the callback
+  /// returns: `'s` is the caller's to bound by it (its info's lifetime).
+  #[inline(always)]
+  pub unsafe fn unseal_in_callback<'s>(self) -> Local<'s, T> {
+    // SAFETY: a handle's location, per the caller.
+    unsafe { Local::from_non_null(self.0) }
+  }
+}
