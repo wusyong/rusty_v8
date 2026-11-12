@@ -209,6 +209,12 @@ Code changes are marked with `machopo:` comments.
   tells whether the slot's object is a handle's, read in place
   (`object_address`): a listener already added is found with no local made
   of each one's callback. Rust only.
+- **`Context::current_global`** (`src/context.rs`, 2026-11-12): the
+  current context's global object from the isolate alone
+  (`GetCurrentContext()->Global()`), its handle left in V8's current handle
+  scope: a callback with no scope finds its current realm (a static
+  operation's, a constructor's, which have no receiver to find it by).
+  Rust only.
 - **Isolate data read inline** (`src/isolate.rs`, 2026-10-27):
   `get_data_internal` (and so the annex every scope looks up, and
   `get_data`) reads V8's isolate data slots at

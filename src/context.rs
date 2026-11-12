@@ -28,6 +28,10 @@ unsafe extern "C" {
   ) -> *const Context;
   fn v8__Isolate__GetCurrent() -> *mut RealIsolate;
   fn v8__Context__Global(this: *const Context) -> *const Object;
+  // machopo: `Context::current_global`.
+  fn v8__Isolate__GetCurrentContext(
+    isolate: *mut RealIsolate,
+  ) -> *const Context;
   // machopo: `Context::detach_global`.
   fn v8__Context__DetachGlobal(this: *const Context);
   fn v8__Context__GetExtrasBindingObject(this: *const Context)
@@ -143,6 +147,31 @@ impl Context {
   #[inline(always)]
   pub fn global<'s>(&self, scope: &PinScope<'s, '_, ()>) -> Local<'s, Object> {
     unsafe { scope.cast_local(|_| v8__Context__Global(self)) }.unwrap()
+  }
+
+  /// machopo: the global object of `isolate`'s current context (V8's
+  /// `isolate->GetCurrentContext()->Global()`, as an embedder's callback
+  /// asks for its current realm), its handle left in V8's current handle
+  /// scope with no scope of rusty_v8's to name it by: for a callback that
+  /// makes none (`FunctionCallbackInfo::isolate`). Both calls make a handle
+  /// and allocate nothing on V8's heap.
+  ///
+  /// # Safety
+  ///
+  /// On the isolate's thread, in a callback of V8's: a context is entered
+  /// and a handle scope open (the callback's own, which V8 opens around
+  /// it). The handle isn't used after that scope ends: `'s` is the
+  /// caller's to bound by it (the callback's info's lifetime).
+  #[inline(always)]
+  pub unsafe fn current_global<'s>(
+    isolate: &crate::Isolate,
+  ) -> Local<'s, Object> {
+    // SAFETY: a context is entered, per the caller: neither is null.
+    unsafe {
+      let context = v8__Isolate__GetCurrentContext(isolate.as_real_ptr());
+      debug_assert!(!context.is_null());
+      Local::from_raw_unchecked(v8__Context__Global(context))
+    }
   }
 
   /// machopo: Detaches the global proxy from this context (V8's
