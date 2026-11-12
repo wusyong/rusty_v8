@@ -220,6 +220,10 @@ Code changes are marked with `machopo:` comments.
   scope: a callback with no scope reads what an edge of the embedder's
   holds (an `ImageData`'s array, whose bytes `putImageData` reads in
   place). Rust only.
+- **`PropertyCallbackInfo::isolate` and `arguments`** (`src/function.rs`,
+  2026-11-12): an interceptor's raw callback (`getter_raw`) reads its
+  isolate, holder and data from the info with no `CallbackScope` made, as
+  a function's does (`FunctionCallbackInfo::isolate`). Rust only.
 - **Isolate data read inline** (`src/isolate.rs`, 2026-10-27):
   `get_data_internal` (and so the annex every scope looks up, and
   `get_data`) reads V8's isolate data slots at

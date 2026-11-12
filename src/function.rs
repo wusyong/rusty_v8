@@ -689,6 +689,24 @@ impl<T> PropertyCallbackInfo<T> {
   pub(crate) fn get_isolate_ptr(&self) -> *mut RealIsolate {
     unsafe { v8__PropertyCallbackInfo__GetIsolate(&self.0) }
   }
+
+  /// machopo: the callback's isolate with no scope made (an [`Isolate`] is
+  /// its pointer, which V8's own accessor reads from the info): for a raw
+  /// interceptor callback (`getter_raw`) that needs no scope, as
+  /// `FunctionCallbackInfo::isolate` is for a function's. The caller
+  /// keeps a reference made of it the only one in use.
+  #[inline(always)]
+  pub fn isolate(&self) -> Isolate {
+    // SAFETY: a callback's info's isolate is never null.
+    unsafe { Isolate::from_raw_ptr_unchecked(self.get_isolate_ptr()) }
+  }
+
+  /// machopo: the info's holder and data, for a raw interceptor callback
+  /// (rusty_v8's own trampolines make them).
+  #[inline(always)]
+  pub fn arguments(&self) -> PropertyCallbackArguments<'_> {
+    PropertyCallbackArguments::from_property_callback_info(self)
+  }
 }
 
 #[derive(Debug)]
