@@ -164,6 +164,24 @@ impl<T> TracedSlot<T> {
     }
   }
 
+  /// machopo: as `get`, with no scope of rusty_v8's: the handle is left in
+  /// V8's current handle scope, for a callback that makes none
+  /// (`FunctionCallbackInfo::isolate`). `None` if the slot is empty.
+  ///
+  /// # Safety
+  ///
+  /// As `get`; and V8 has a handle scope open (a callback's own, which it
+  /// opens around it), which the handle isn't used after: `'s` is the
+  /// caller's to bound by it (the callback's info's lifetime).
+  pub unsafe fn get_in_callback<'s>(
+    &self,
+    isolate: &crate::Isolate,
+  ) -> Option<crate::Local<'s, T>> {
+    // SAFETY: on the slot's heap's thread with a handle scope open, per
+    // the caller.
+    unsafe { crate::Local::from_raw(self.get_in_current_scope(isolate)) }
+  }
+
   /// Whether the slot is empty, read atomically: the C++ object is a single
   /// pointer (`location_`), null when empty, as `IsEmptyThreadSafe` reads it.
   fn is_empty(&self) -> bool {
@@ -182,7 +200,11 @@ impl<T> TracedSlot<T> {
   /// takes the isolate, not a scope: it makes a traced handle, no local).
   /// The slot must be in its final place: a field of a GC object already
   /// on the heap, never moved again.
-  pub unsafe fn set(&self, isolate: &crate::Isolate, value: Option<Local<'_, T>>) {
+  pub unsafe fn set(
+    &self,
+    isolate: &crate::Isolate,
+    value: Option<Local<'_, T>>,
+  ) {
     let value = value
       .map_or(std::ptr::null_mut(), |v| v.as_non_null().as_ptr())
       .cast();
@@ -205,8 +227,7 @@ impl<T> TracedSlot<T> {
     // SAFETY: on the heap's thread, per the caller; a handle's location
     // holds its value's tagged address, as the slot's node does.
     unsafe {
-      self.object_address()
-        == Some(*(&*value as *const S).cast::<usize>())
+      self.object_address() == Some(*(&*value as *const S).cast::<usize>())
     }
   }
 

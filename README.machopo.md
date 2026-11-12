@@ -215,6 +215,11 @@ Code changes are marked with `machopo:` comments.
   scope: a callback with no scope finds its current realm (a static
   operation's, a constructor's, which have no receiver to find it by).
   Rust only.
+- **`TracedSlot::get_in_callback`** (`src/cppgc/slot.rs`, 2026-11-12):
+  `get` with the isolate alone, its handle left in V8's current handle
+  scope: a callback with no scope reads what an edge of the embedder's
+  holds (an `ImageData`'s array, whose bytes `putImageData` reads in
+  place). Rust only.
 - **Isolate data read inline** (`src/isolate.rs`, 2026-10-27):
   `get_data_internal` (and so the annex every scope looks up, and
   `get_data`) reads V8's isolate data slots at
