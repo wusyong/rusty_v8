@@ -224,6 +224,15 @@ Code changes are marked with `machopo:` comments.
   2026-11-12): an interceptor's raw callback (`getter_raw`) reads its
   isolate, holder and data from the info with no `CallbackScope` made, as
   a function's does (`FunctionCallbackInfo::isolate`). Rust only.
+- **Raw callbacks for a cached getter and a call handler**
+  (`src/machopo.rs`, `src/template.rs`, 2026-11-13):
+  `function_template_with_cache` takes V8's own callback (as
+  `FunctionTemplate::builder_raw`'s), and
+  `ObjectTemplate::set_call_as_function_handler_raw` is
+  `set_call_as_function_handler` with one, so that machopo's last DOM
+  members given a scope by rusty_v8's trampoline (a cached accessor's
+  getter, a legacy caller) take the info alone as the others do. Rust
+  only.
 - **A wrapper's tag compared once** (`src/machopo.rs`, 2026-11-13):
   `object_of` (the inline `unwrap` and `unwrap_receiver`) masks the
   entry's marking bit off and compares the tag once, instead of comparing

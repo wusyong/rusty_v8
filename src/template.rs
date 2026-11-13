@@ -1233,4 +1233,23 @@ impl ObjectTemplate {
       );
     }
   }
+
+  // machopo: the handler V8's own callback, given the info alone (as
+  // `FunctionTemplate::builder_raw`'s): no scope made for it.
+  /// As [`ObjectTemplate::set_call_as_function_handler`], with a raw
+  /// callback.
+  #[inline(always)]
+  pub fn set_call_as_function_handler_raw(
+    &self,
+    callback: FunctionCallback,
+    data: Option<Local<'_, Value>>,
+  ) {
+    unsafe {
+      v8__ObjectTemplate__SetCallAsFunctionHandler(
+        self,
+        callback,
+        data.map_or_else(null, |p| &*p),
+      );
+    }
+  }
 }

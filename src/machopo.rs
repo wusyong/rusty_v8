@@ -41,7 +41,6 @@ use std::ptr::{self, NonNull};
 
 use crate::cppgc::{Heap, TracedSlot};
 use crate::isolate::RealIsolate;
-use crate::support::MapFnTo;
 use crate::support::Opaque;
 use crate::{
   Data, FunctionCallback, FunctionTemplate, Isolate, Local, Object, PinScope,
@@ -793,10 +792,11 @@ pub unsafe fn clone_object_in_callback<'s>(
 /// one (`FunctionTemplate::NewWithCache`, as Blink's `[CachedAccessor]`):
 /// V8's inline caches and optimizing compilers load the property as data,
 /// calling `callback` only while there is none. The embedder sets the
-/// property, and sets it again when the value changes.
+/// property, and sets it again when the value changes. `callback` is V8's
+/// own (as `FunctionTemplate::builder_raw`'s), given the info alone.
 pub fn function_template_with_cache<'s>(
   scope: &PinScope<'s, '_, ()>,
-  callback: impl MapFnTo<FunctionCallback>,
+  callback: FunctionCallback,
   cache: Local<Private>,
   signature: Option<Local<Signature>>,
   length: i32,
@@ -808,7 +808,7 @@ pub fn function_template_with_cache<'s>(
     scope.cast_local(|sd| {
       v8__machopo__FunctionTemplate__NewWithCache(
         sd.get_isolate_ptr(),
-        callback.map_fn_to(),
+        callback,
         &*cache,
         signature.map_or(ptr::null(), |signature| &*signature),
         length,
