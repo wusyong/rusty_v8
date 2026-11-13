@@ -224,6 +224,11 @@ Code changes are marked with `machopo:` comments.
   2026-11-12): an interceptor's raw callback (`getter_raw`) reads its
   isolate, holder and data from the info with no `CallbackScope` made, as
   a function's does (`FunctionCallbackInfo::isolate`). Rust only.
+- **A wrapper's tag compared once** (`src/machopo.rs`, 2026-11-13):
+  `object_of` (the inline `unwrap` and `unwrap_receiver`) masks the
+  entry's marking bit off and compares the tag once, instead of comparing
+  it with each of the two values the bit gives: 4 to 7 instructions fewer
+  a DOM call (machopo counted `nodeType` 108 to 103). Rust only.
 - **`Context::current_in_callback`, `Local::new_in_callback`,
   `machopo::clone_object_in_callback`** (`src/context.rs`,
   `src/handle.rs`, `src/machopo.rs`, 2026-11-13): the current context, a

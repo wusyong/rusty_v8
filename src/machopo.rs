@@ -539,11 +539,12 @@ unsafe fn object_of(
     (*table.add((handle >> INDEX_SHIFT) as usize))
       .load(std::sync::atomic::Ordering::Relaxed)
   };
-  // The tag in the low 16 bits, shifted by one over the marking bit; the
-  // null handle's entry, all zeros, fails it.
-  let actual = u32::from(entry as u16);
+  // The tag in the low 16 bits, shifted by one over the marking bit
+  // (masked off: one comparison, whichever the bit is); the null handle's
+  // entry, all zeros, fails it.
+  let actual = u32::from(entry as u16) & !1;
   let first = u32::from(tag) << TAG_SHIFT;
-  if actual == first || actual == first + 1 {
+  if actual == first {
     NonNull::new((entry >> PAYLOAD_SHIFT) as *mut c_void)
   } else {
     None
