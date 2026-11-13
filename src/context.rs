@@ -174,6 +174,25 @@ impl Context {
     }
   }
 
+  /// machopo: the current context (V8's `Isolate::GetCurrentContext`),
+  /// with no scope made.
+  ///
+  /// # Safety
+  ///
+  /// As `current_global`'s: in a callback of V8's on the isolate's thread,
+  /// the handle not used after the callback returns.
+  #[inline(always)]
+  pub unsafe fn current_in_callback<'s>(
+    isolate: &crate::Isolate,
+  ) -> Local<'s, Context> {
+    // SAFETY: a context is entered, per the caller: it isn't null.
+    unsafe {
+      let context = v8__Isolate__GetCurrentContext(isolate.as_real_ptr());
+      debug_assert!(!context.is_null());
+      Local::from_raw_unchecked(context)
+    }
+  }
+
   /// machopo: Detaches the global proxy from this context (V8's
   /// `Context::DetachGlobal`): the context's global object is no longer
   /// reachable through it, and a new context can be made with it

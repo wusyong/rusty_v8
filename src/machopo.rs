@@ -767,6 +767,26 @@ pub fn clone_object<'s>(
   .expect("V8 copies an object")
 }
 
+/// `clone_object` with no scope made, in a callback of V8's: the copy is
+/// a handle of the callback's own handle scope.
+///
+/// # Safety
+///
+/// Called in a callback of V8's on `isolate`'s thread, `object` one of its
+/// objects; the handle isn't used after the callback returns (`'s` is the
+/// caller's to bound by it).
+pub unsafe fn clone_object_in_callback<'s>(
+  isolate: &Isolate,
+  object: Local<Object>,
+) -> Local<'s, Object> {
+  // SAFETY: the isolate, on its thread, and a handle of it, per the
+  // caller; V8 makes the copy's handle in its open handle scope.
+  unsafe {
+    Local::from_raw(v8__machopo__Object__Clone(isolate.as_real_ptr(), &*object))
+  }
+  .expect("V8 copies an object")
+}
+
 /// A getter's function template whose result V8 reads from `cache`, a
 /// private property of the object the accessor is found on, once it has
 /// one (`FunctionTemplate::NewWithCache`, as Blink's `[CachedAccessor]`):

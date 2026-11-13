@@ -224,6 +224,15 @@ Code changes are marked with `machopo:` comments.
   2026-11-12): an interceptor's raw callback (`getter_raw`) reads its
   isolate, holder and data from the info with no `CallbackScope` made, as
   a function's does (`FunctionCallbackInfo::isolate`). Rust only.
+- **`Context::current_in_callback`, `Local::new_in_callback`,
+  `machopo::clone_object_in_callback`** (`src/context.rs`,
+  `src/handle.rs`, `src/machopo.rs`, 2026-11-13): the current context, a
+  local handle of a `Global`'s value (checked to be the isolate's, as
+  `Local::new`), and `clone_object`, each with no scope made, for a
+  callback of V8's (their handles the callback's own handle scope's, as
+  `unseal_in_callback`'s). machopo's bindings make a node's wrapper from
+  its realm's boilerplate with them, given the callback's info alone.
+  Rust only.
 - **`String::new_from_utf8_in_callback`** (`src/string.rs`, 2026-11-12):
   `new_from_utf8` with no scope made, for a callback of V8's (the string a
   handle of the callback's own handle scope, as `unseal_in_callback`'s):

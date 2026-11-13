@@ -186,6 +186,35 @@ impl<'s, T> Local<'s, T> {
     unsafe { O::extend_lifetime_unchecked_from(self) }
   }
 
+  /// machopo: `Local::new` with no scope made: a local handle of
+  /// `handle`'s value (a `Global`'s), one of the callback's own handle
+  /// scope (`Local::New`).
+  ///
+  /// # Safety
+  ///
+  /// In a callback of V8's on `isolate`'s thread; the handle isn't used
+  /// after the callback returns (`'s` is the caller's to bound by it).
+  ///
+  /// # Panics
+  ///
+  /// If `handle` isn't `isolate`'s, as `Local::new`.
+  #[inline(always)]
+  pub unsafe fn new_in_callback(
+    isolate: &Isolate,
+    handle: impl Handle<Data = T>,
+  ) -> Self {
+    let HandleInfo { data, host } = handle.get_handle_info();
+    host.assert_match_isolate(isolate);
+    // SAFETY: the isolate, on its thread, and a value of it (checked);
+    // V8 makes the handle in its open handle scope, per the caller.
+    unsafe {
+      Self::from_raw_unchecked(v8__Local__New(
+        isolate.as_real_ptr(),
+        data.cast().as_ptr(),
+      ) as *const T)
+    }
+  }
+
   #[inline(always)]
   pub(crate) unsafe fn from_raw(ptr: *const T) -> Option<Self> {
     NonNull::new(ptr as *mut _).map(|nn| unsafe { Self::from_non_null(nn) })
