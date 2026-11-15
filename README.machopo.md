@@ -247,6 +247,17 @@ Code changes are marked with `machopo:` comments.
   `unseal_in_callback`'s). machopo's bindings make a node's wrapper from
   its realm's boilerplate with them, given the callback's info alone.
   Rust only.
+- **`machopo::internalized_hash`, `Local::is_same_object`,
+  `Local::new_in_callback_unchecked`** (`src/machopo.rs`, `src/handle.rs`,
+  2026-11-15): an internalized string's hash field, read by V8's layout
+  (the instance type's `kIsNotInternalizedMask`, `Name::raw_hash_field`
+  after the map: check both when V8 is upgraded); whether a local handle
+  and a `Global` hold the same object, their tagged addresses compared in
+  place; and `new_in_callback` of a `Global` the caller knows is the
+  isolate's and alive. machopo's bindings find a name by its V8 string's
+  identity with the first two (a literal is internalized: the same
+  object each time), and take a wrapper boilerplate's handle with the
+  third. Rust only.
 - **`Object::get_creation_context_in_callback`** (`src/object.rs`,
   2026-11-15): `get_creation_context` with no scope made, for a callback
   of V8's (the context's handle the callback's own handle scope's, as

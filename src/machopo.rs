@@ -727,6 +727,43 @@ pub fn as_string<'s>(value: Local<'s, Value>) -> Option<Local<'s, crate::String>
   is_string.then(|| unsafe { Local::cast_unchecked(value) })
 }
 
+/// machopo: an internalized string's hash field, none for a string that
+/// isn't internalized. An internalized string is the one object of its
+/// characters in the isolate (`StringTable`), so two that are the same
+/// object are the same string, and V8 computed its hash as it interned it
+/// (`Name::raw_hash_field`, the 32 bits after the map: the hash, or an
+/// array index's value, with `Name::kHashNotComputedMask` clear;
+/// `kIsNotInternalizedMask` of the map's instance type,
+/// `src/objects/instance-type.h`). Read in place, with no call into V8.
+#[inline(always)]
+pub fn internalized_hash(string: Local<'_, crate::String>) -> Option<u32> {
+  const NAME_HASH_OFFSET: usize = 4;
+  const NOT_INTERNALIZED: u16 = 1 << 5;
+  const HASH_NOT_COMPUTED: u32 = 1;
+  // SAFETY: as `as_string`'s: a handle's location holds its value's tagged
+  // address, a string's (a heap object's), whose map holds its instance
+  // type and whose second word is its hash field.
+  unsafe {
+    let object = *(&*string as *const crate::String).cast::<usize>();
+    let cage = object & !(CAGE_ALIGNMENT - 1);
+    let map = cage + ((object - HEAP_OBJECT_TAG) as *const u32).read() as usize;
+    let instance_type = ((map - HEAP_OBJECT_TAG + MAP_INSTANCE_TYPE_OFFSET)
+      as *const u16)
+      .read();
+    if instance_type & NOT_INTERNALIZED != 0 {
+      return None;
+    }
+    let hash =
+      ((object - HEAP_OBJECT_TAG + NAME_HASH_OFFSET) as *const u32).read();
+    // The layout checked against V8's own answer: a field that holds a
+    // hash (`Name::HashFieldType::kHash`) holds it past its two type bits.
+    debug_assert!(
+      hash & 3 != 2 || (hash >> 2) as i32 == string.get_identity_hash().get()
+    );
+    (hash & HASH_NOT_COMPUTED == 0).then_some(hash)
+  }
+}
+
 /// machopo: `value` as a small integer if it is one (a Smi: V8's tagged
 /// value with `kSmiTag`, 31 bits with pointer compression,
 /// `Internals::SmiValue`), with no call into V8: what most integer

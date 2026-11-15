@@ -215,6 +215,46 @@ impl<'s, T> Local<'s, T> {
     }
   }
 
+  /// machopo: `new_in_callback` of a `Global` known to be `isolate`'s and
+  /// alive, with neither checked (`Global`'s liveness, its isolate): what
+  /// the isolate's own state holds, read in a callback of the isolate's.
+  ///
+  /// # Safety
+  ///
+  /// As `new_in_callback`'s; and `global` is `isolate`'s, which is alive.
+  #[inline(always)]
+  pub unsafe fn new_in_callback_unchecked(
+    isolate: &Isolate,
+    global: &Global<T>,
+  ) -> Self {
+    // SAFETY: the isolate, on its thread, and a value of it, per the
+    // caller; V8 makes the handle in its open handle scope.
+    unsafe {
+      Self::from_raw_unchecked(v8__Local__New(
+        isolate.as_real_ptr(),
+        global.data.cast().as_ptr(),
+      ) as *const T)
+    }
+  }
+
+  /// machopo: whether this handle and `global` hold the same object (the
+  /// same tagged address, as `v8::Data::operator==` of two objects that
+  /// aren't both strings or numbers compares), read in place with no
+  /// call into V8.
+  ///
+  /// # Safety
+  ///
+  /// `global`'s isolate is alive (its slot is read).
+  #[inline(always)]
+  pub unsafe fn is_same_object<U>(&self, global: &Global<U>) -> bool {
+    // SAFETY: a handle's location holds its value's tagged address; the
+    // global's slot is its isolate's, alive per the caller.
+    unsafe {
+      *(&**self as *const T).cast::<usize>()
+        == *global.data.as_ptr().cast::<usize>()
+    }
+  }
+
   #[inline(always)]
   pub(crate) unsafe fn from_raw(ptr: *const T) -> Option<Self> {
     NonNull::new(ptr as *mut _).map(|nn| unsafe { Self::from_non_null(nn) })
