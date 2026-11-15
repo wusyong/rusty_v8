@@ -247,6 +247,12 @@ Code changes are marked with `machopo:` comments.
   `unseal_in_callback`'s). machopo's bindings make a node's wrapper from
   its realm's boilerplate with them, given the callback's info alone.
   Rust only.
+- **`Object::get_creation_context_in_callback`** (`src/object.rs`,
+  2026-11-15): `get_creation_context` with no scope made, for a callback
+  of V8's (the context's handle the callback's own handle scope's, as
+  `Context::current_in_callback`'s). machopo's bindings find the realm a
+  new node's wrapper is of from the call's `this` with it, given the
+  callback's info alone. Rust only.
 - **`String::new_from_utf8_in_callback`** (`src/string.rs`, 2026-11-12):
   `new_from_utf8` with no scope made, for a callback of V8's (the string a
   handle of the callback's own handle scope, as `unseal_in_callback`'s):

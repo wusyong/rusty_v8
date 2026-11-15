@@ -688,6 +688,24 @@ impl Object {
     unsafe { scope.cast_local(|_| v8__Object__GetCreationContext(self)) }
   }
 
+  /// machopo: `get_creation_context` with no scope made, in a callback of
+  /// V8's: the context's handle is of the callback's own handle scope
+  /// (V8 makes it in the open one), as `Context::current_in_callback`'s.
+  ///
+  /// # Safety
+  ///
+  /// Called in a callback of V8's on the object's isolate's thread; the
+  /// handle isn't used after the callback returns (`'s` is the caller's to
+  /// bound by it).
+  #[inline(always)]
+  pub unsafe fn get_creation_context_in_callback<'s>(
+    &self,
+  ) -> Option<Local<'s, Context>> {
+    // SAFETY: an object of the isolate, on its thread, per the caller; V8
+    // makes the context's handle in its open handle scope.
+    unsafe { Local::from_raw(v8__Object__GetCreationContext(self)) }
+  }
+
   /// This function has the same functionality as GetPropertyNames but the
   /// returned array doesn't contain the names of properties from prototype
   /// objects.
