@@ -322,6 +322,18 @@ Code changes are marked with `machopo:` comments.
   has the same code. Rust only: the prebuilt library doesn't change. machopo's
   `bindings` test `isolate_teardown` drops an isolate whose context has a
   slot under `--stress-compaction`; it crashes without this.
+  So too, since 2026-11-18 (found by machopo's `scripts/test.py fuzz` under
+  `--stress-compaction` with a debug V8), a `Weak` whose first pass ran and
+  whose second pass is pending: its pointer is `None` by then, so the check
+  above missed it, and the second pass V8's teardown runs
+  (`InvokeSecondPassPhantomCallbacks`) read the freed `WeakData` (a panic at
+  `finalizer_id.unwrap()`, inside an `extern "C"` callback: an abort).
+  `WeakData` now records a pending second pass (`second_pass_pending`, set
+  by the first pass, cleared by the second), and `Drop` keeps the data while
+  it is set. No test of its own: in machopo's `bindings` tests V8 runs the
+  second pass right after the first, so none is pending when the isolate
+  goes; machopo's fuzz configuration that found it fails without this, run
+  with one test thread.
   Not reported upstream yet; machopo's `crates/bindings/soundness.md` lists it with
   the other candidates.
 - **A `ValueSerializer` delegate that refused by throwing isn't asked

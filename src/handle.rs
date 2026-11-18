@@ -926,6 +926,7 @@ impl<T> Weak<T> {
       pointer: Default::default(),
       finalizer_id,
       weak_dropped: Cell::new(false),
+      second_pass_pending: Cell::new(false),
     });
     let data = data.cast().as_ptr();
     let data = unsafe {
@@ -1157,6 +1158,9 @@ impl<T> Weak<T> {
 
     // Only set the second pass callback if there could be a finalizer.
     if weak_data.finalizer_id.is_some() {
+      // machopo: what `Drop` reads, once the isolate's handle is disposed,
+      // to keep the data for this callback.
+      weak_data.second_pass_pending.set(true);
       unsafe {
         v8__WeakCallbackInfo__SetSecondPassCallback(
           wci,
@@ -1182,6 +1186,7 @@ impl<T> Weak<T> {
     };
 
     let mut isolate = unsafe { Isolate::from_raw_ptr(isolate) };
+    weak_data.second_pass_pending.set(false);
     let finalizer: Option<FinalizerCallback> = {
       let finalizer_id = weak_data.finalizer_id.unwrap();
       isolate.get_finalizer_map_mut().map.remove(&finalizer_id)
@@ -1250,7 +1255,12 @@ impl<T> Drop for Weak<T> {
       // still call the first pass callback with this WeakData. Leak it, as
       // for a pending second pass; that callback frees it if a second pass
       // follows.
-      if weak_data.pointer.get().is_some() {
+      // machopo: so too once the first pass ran, its second pass pending:
+      // V8's teardown calls that too, and the disposed handle tells
+      // `remove_finalizer` nothing of it.
+      if weak_data.pointer.get().is_some()
+        || weak_data.second_pass_pending.get()
+      {
         weak_data.weak_dropped.set(true);
         Box::leak(weak_data);
         return;
@@ -1318,6 +1328,8 @@ pub struct WeakData<T> {
   pointer: Cell<Option<NonNull<T>>>,
   finalizer_id: Option<FinalizerId>,
   weak_dropped: Cell<bool>,
+  // machopo: the first pass set the second pass, which hasn't run yet.
+  second_pass_pending: Cell<bool>,
 }
 
 impl<T> std::fmt::Debug for WeakData<T> {
