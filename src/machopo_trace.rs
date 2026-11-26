@@ -18,7 +18,6 @@ unsafe extern "C" {
     category_count: usize,
     buffer_kb: u32,
   ) -> bool;
-  #[cfg(unix)]
   fn machopo__Trace__StartInto(
     fd: std::ffi::c_int,
     categories: *const *const c_char,
@@ -99,6 +98,53 @@ pub fn start_into(
       pointers.len(),
       buffer_kb,
     )
+  }
+}
+
+#[cfg(windows)]
+unsafe extern "C" {
+  /// The C runtime's: a descriptor of its own for an operating system's
+  /// handle, which is the descriptor's from then on (`<io.h>`).
+  fn _open_osfhandle(handle: isize, flags: std::ffi::c_int) -> std::ffi::c_int;
+}
+
+/// As [`start`], into `file`, already open for writing: for a process that
+/// can't open its trace's file itself (one started inside a sandbox with
+/// no file system to write, which is handed the file by whoever started
+/// it). The file is the session's from here on, closed by [`stop`], or at
+/// once if a session was already started or the C runtime has no
+/// descriptor left for it (false).
+#[cfg(windows)]
+pub fn start_into(
+  file: std::fs::File,
+  categories: &[&str],
+  buffer_kb: u32,
+) -> bool {
+  use std::os::windows::io::{FromRawHandle, IntoRawHandle, OwnedHandle};
+  /// `_O_BINARY`: what is written is written as it is.
+  const BINARY: std::ffi::c_int = 0x8000;
+  let handle = file.into_raw_handle();
+  // SAFETY: the handle is the file's own, open, and given up here: the
+  // descriptor owns it once there is one, and `_close` closes both.
+  let fd = unsafe { _open_osfhandle(handle as isize, BINARY) };
+  if fd < 0 {
+    // SAFETY: no descriptor took the handle, which is still this
+    // function's alone to close.
+    drop(unsafe { OwnedHandle::from_raw_handle(handle) });
+    return false;
+  }
+  let categories: Vec<CString> = categories
+    .iter()
+    .filter_map(|category| CString::new(*category).ok())
+    .collect();
+  let pointers: Vec<*const c_char> = categories
+    .iter()
+    .map(|category| category.as_ptr())
+    .collect();
+  // SAFETY: the strings and the array outlive the call, which copies them;
+  // the descriptor is given up to the C++ (which closes it).
+  unsafe {
+    machopo__Trace__StartInto(fd, pointers.as_ptr(), pointers.len(), buffer_kb)
   }
 }
 

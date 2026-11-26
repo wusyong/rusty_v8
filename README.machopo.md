@@ -436,11 +436,14 @@ Code changes are marked with `machopo:` comments.
   rather than waits.
 - **A trace into a file already open** (`src/machopo_trace.cc`,
   `src/machopo_trace.rs`; 2026-11-26): `v8::machopo_trace::start_into` takes
-  the file in place of its path (Unix so far). machopo's renderer process
-  opens its trace's file, enters its sandbox, and only then starts the
-  trace: starting it makes a thread (Perfetto's `TracingMuxer`), which a
-  process may not have when it enters, and after entering no file can be
-  opened for writing.
+  the file in place of its path. machopo's renderer process opens its
+  trace's file, enters its sandbox, and only then starts the trace:
+  starting it makes a thread (Perfetto's `TracingMuxer`), which a process
+  may not have when it enters, and after entering no file can be opened for
+  writing. On Windows (2026-11-26; Rust only: the C++ takes the C runtime's
+  descriptor on every platform) the file's handle becomes a descriptor
+  with `_open_osfhandle`: a renderer there is inside its sandbox from its
+  start, and is handed the file by its browser.
 - **User Timing in the trace** (`src/machopo_trace.cc`, `src/machopo_trace.rs`;
   2026-10-18): `v8::machopo_trace::mark` and `measure` write the page's
   `performance.mark()` and `measure()` as Chrome's trace has them, under
