@@ -434,6 +434,13 @@ Code changes are marked with `machopo:` comments.
   DOM's heap lost some of the main thread's events (cppgc's marking steps
   on allocation, thousands a second), and the track event data source drops
   rather than waits.
+- **A trace into a file already open** (`src/machopo_trace.cc`,
+  `src/machopo_trace.rs`; 2026-11-26): `v8::machopo_trace::start_into` takes
+  the file in place of its path (Unix so far). machopo's renderer process
+  opens its trace's file, enters its sandbox, and only then starts the
+  trace: starting it makes a thread (Perfetto's `TracingMuxer`), which a
+  process may not have when it enters, and after entering no file can be
+  opened for writing.
 - **User Timing in the trace** (`src/machopo_trace.cc`, `src/machopo_trace.rs`;
   2026-10-18): `v8::machopo_trace::mark` and `measure` write the page's
   `performance.mark()` and `measure()` as Chrome's trace has them, under

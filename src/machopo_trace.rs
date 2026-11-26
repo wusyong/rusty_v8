@@ -18,6 +18,13 @@ unsafe extern "C" {
     category_count: usize,
     buffer_kb: u32,
   ) -> bool;
+  #[cfg(unix)]
+  fn machopo__Trace__StartInto(
+    fd: std::ffi::c_int,
+    categories: *const *const c_char,
+    category_count: usize,
+    buffer_kb: u32,
+  ) -> bool;
   fn machopo__Trace__Stop();
   fn machopo__Trace__Begin(name: *const c_char, name_len: usize);
   fn machopo__Trace__End();
@@ -55,6 +62,39 @@ pub fn start(path: &Path, categories: &[&str], buffer_kb: u32) -> bool {
   unsafe {
     machopo__Trace__Start(
       path.as_ptr(),
+      pointers.as_ptr(),
+      pointers.len(),
+      buffer_kb,
+    )
+  }
+}
+
+/// As [`start`], into `file`, already open for writing: for a process that
+/// opens its trace's file while it can and starts the trace once it no
+/// longer could (inside a sandbox with no file system to write; the trace
+/// starts a thread, which a process about to enter one may not have yet).
+/// The file is the session's from here on, closed by [`stop`], or at once
+/// if a session was already started (false).
+#[cfg(unix)]
+pub fn start_into(
+  file: std::fs::File,
+  categories: &[&str],
+  buffer_kb: u32,
+) -> bool {
+  use std::os::fd::IntoRawFd;
+  let categories: Vec<CString> = categories
+    .iter()
+    .filter_map(|category| CString::new(*category).ok())
+    .collect();
+  let pointers: Vec<*const c_char> = categories
+    .iter()
+    .map(|category| category.as_ptr())
+    .collect();
+  // SAFETY: the strings and the array outlive the call, which copies them;
+  // the descriptor is the file's own, given up to the C++ (which closes it).
+  unsafe {
+    machopo__Trace__StartInto(
+      file.into_raw_fd(),
       pointers.as_ptr(),
       pointers.len(),
       buffer_kb,

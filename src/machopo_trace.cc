@@ -111,11 +111,28 @@ extern "C" {
 // that don't show). Before V8's platform is initialized, or V8 doesn't
 // register its events. False if the file can't be written or a session
 // was already started.
+bool machopo__Trace__StartInto(int fd, const char* const* categories,
+                           size_t category_count, uint32_t buffer_kb);
+
 bool machopo__Trace__Start(const char* path, const char* const* categories,
                        size_t category_count, uint32_t buffer_kb) {
   if (session != nullptr) return false;
   int fd = OpenForWriting(path);
   if (fd < 0) return false;
+  return machopo__Trace__StartInto(fd, categories, category_count, buffer_kb);
+}
+
+// As Start, into `fd`, a file already open for writing (the C runtime's
+// descriptor): for a process that opens its trace's file while it can and
+// starts the trace once it no longer could (inside a sandbox with no file
+// system to write). `fd` is the session's from here on, closed by Stop, or
+// at once if a session was already started (false).
+bool machopo__Trace__StartInto(int fd, const char* const* categories,
+                           size_t category_count, uint32_t buffer_kb) {
+  if (session != nullptr) {
+    CloseFile(fd);
+    return false;
+  }
 
   perfetto::TracingInitArgs args;
   args.backends = perfetto::kInProcessBackend;
