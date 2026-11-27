@@ -587,6 +587,15 @@ Code changes are marked with `machopo:` comments.
   with it, which cppgc's graph builder leaves out (the V8 fork's patch).
   C++: the prebuilt library changes. machopo's `bindings` test
   `heap_snapshot` checks the nodes, edges, wrapper merge and detachedness.
+- **`V8InspectorSession::state`** (`src/inspector.rs`, `src/binding.cc`,
+  2026-11-28): a session's state (`state`, as CBOR in a `StringBuffer` of
+  8-bit characters), which `V8Inspector::connect` takes back as its
+  `state` for a session that goes on where another was (its domains
+  restored: Blink's state cookie, for a session whose page moved to
+  another renderer). Breakpoints set by URL aren't in it (V8 keeps them
+  apart). C++: the prebuilt library changes. The fork's test
+  `inspector_session_state_round_trip`; machopo's `dom_js` tests of a
+  session going on in another engine.
 - **`.github/workflows/machopo-release.yml`**: builds and publishes machopo's
   prebuilt V8 (see "Releases").
 - **`Cargo.lock`: bindgen 0.72.1 and clang-sys 1.9.1** (upstream locks

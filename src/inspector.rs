@@ -88,6 +88,10 @@ unsafe extern "C" {
     session: *mut RawV8InspectorSession,
     object_group: StringView,
   );
+  // machopo: `V8InspectorSession::state`.
+  fn v8_inspector__V8InspectorSession__state(
+    session: *mut RawV8InspectorSession,
+  ) -> UniquePtr<StringBuffer>;
   fn v8_inspector__V8InspectorSession__wrapObject(
     session: *mut RawV8InspectorSession,
     context: *const Context,
@@ -867,6 +871,16 @@ impl V8InspectorSession {
         object_group,
       );
     }
+  }
+
+  // machopo: the session's state.
+  /// The session's state (`V8InspectorSession::state`): what its domains
+  /// have on and how they are set, serialized as CBOR, which
+  /// [`V8Inspector::connect`] takes back as `state` for a session that goes
+  /// on where this one was (a new isolate's, for one whose page moved).
+  /// Breakpoints set by URL aren't in it.
+  pub fn state(&self) -> UniquePtr<StringBuffer> {
+    unsafe { v8_inspector__V8InspectorSession__state(self.raw.as_ptr()) }
   }
 
   /// Wraps a V8 value in an Inspector `Runtime.RemoteObject`.

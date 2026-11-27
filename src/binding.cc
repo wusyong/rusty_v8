@@ -3707,6 +3707,16 @@ void v8_inspector__V8InspectorSession__releaseObjectGroup(
   self->releaseObjectGroup(object_group);
 }
 
+// machopo: the session's state (`V8InspectorSession::state`, CBOR), as a
+// buffer of 8-bit characters, for `connect` to take back.
+v8_inspector::StringBuffer* v8_inspector__V8InspectorSession__state(
+    v8_inspector::V8InspectorSession* self) {
+  std::vector<uint8_t> state = self->state();
+  return v8_inspector::StringBuffer::create(
+             v8_inspector::StringView(state.data(), state.size()))
+      .release();
+}
+
 v8_inspector::protocol::Runtime::API::RemoteObject*
 v8_inspector__V8InspectorSession__wrapObject(
     v8_inspector::V8InspectorSession* self, const v8::Context* context,

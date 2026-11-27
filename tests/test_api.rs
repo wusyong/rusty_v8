@@ -7262,6 +7262,59 @@ fn inspector_dispatch_protocol_message() {
   inspector.context_destroyed(context);
 }
 
+// machopo: the session's state.
+#[test]
+fn inspector_session_state_round_trip() {
+  let _setup_guard = setup::parallel_test();
+  let isolate = &mut v8::Isolate::new(Default::default());
+
+  use v8::inspector::*;
+  let default_client = ClientCounter::new();
+  let inspector_client =
+    V8InspectorClient::new(Box::new(default_client.clone()));
+  let inspector = V8Inspector::create(isolate, inspector_client);
+
+  v8::scope!(let scope, isolate);
+
+  let context = v8::Context::new(scope, Default::default());
+  let mut _scope = v8::ContextScope::new(scope, context);
+
+  let name = b"";
+  let name_view = StringView::from(&name[..]);
+  let aux_data = StringView::from(&name[..]);
+  inspector.context_created(context, 1, name_view, aux_data);
+
+  let connect = |counter: &ChannelCounter, state: &[u8]| {
+    inspector.connect(
+      1,
+      Channel::new(Box::new(counter.clone())),
+      StringView::from(state),
+      V8InspectorClientTrustLevel::FullyTrusted,
+    )
+  };
+  let first = ChannelCounter::new();
+  let session = connect(&first, b"");
+  let message = br#"{"id":1,"method":"Runtime.enable"}"#;
+  session.dispatch_protocol_message(StringView::from(&message[..]));
+  assert_eq!(first.state.borrow().count_send_response, 1);
+  let state = session.state();
+  let state = state.as_ref().unwrap().string();
+  let state = state.characters8().unwrap().to_vec();
+  assert!(!state.is_empty());
+
+  // A session connected with it goes on with `Runtime` on: the context
+  // is told without its asking.
+  let next = ChannelCounter::new();
+  let _restored = connect(&next, &state);
+  assert_eq!(next.state.borrow().count_send_response, 0);
+  assert!(next.state.borrow().count_send_notification >= 1);
+  // One connected afresh is told nothing.
+  let fresh = ChannelCounter::new();
+  let _fresh = connect(&fresh, b"");
+  assert_eq!(fresh.state.borrow().count_send_notification, 0);
+  inspector.context_destroyed(context);
+}
+
 #[test]
 fn inspector_release_object_group() {
   let _setup_guard = setup::parallel_test();
